@@ -1,0 +1,50 @@
+{
+  "project_info": {
+    "project_number": "627645762372",
+    "project_id": "graph-go-bd4f0",
+    "storage_bucket": "graph-go-bd4f0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:627645762372:android:23f34c4589b71788f2a511",
+        "android_client_info": {
+          "package_name": "com.example.graph_go"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "587913414359-k2i90qb6fdrmhho3pvacpepblv1dht4r.apps.googleusercontent.com",
+          "client_type": 1
+        },
+        {
+          "client_id": "627645762372-7idausesu0sdjau43hibcm5r58e41rra.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBMR4ImXGkhbUuzWebkYOtuCOdRITCnH0I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "627645762372-7idausesu0sdjau43hibcm5r58e41rra.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "627645762372-mjpkn58kr2lf5db8o7l0ir0ebcduriij.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.graphGo"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
