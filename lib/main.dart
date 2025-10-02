@@ -1,96 +1,93 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
 import 'firebase_options.dart';
+
+// Providers
+import 'providers/graph_provider.dart';
+import 'providers/settings_provider.dart';
+import 'providers/delivery_provider.dart';
+
+// Screens
 import 'screens/home_screen.dart';
-import 'screens/graph_screen.dart';
+import 'screens/map_screen.dart'; 
 import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
-import 'providers/delivery_provider.dart';
-import 'login.dart';
-import 'signup.dart';
+import 'screens/login.dart';
+import 'screens/signup.dart';
+import 'screens/forgot_password.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  runApp(const GraphGoApp());
+
+  final settingsProvider = await SettingsProvider.create();
+
+  runApp(MyApp(settingsProvider: settingsProvider));
 }
 
-class GraphGoApp extends StatelessWidget {
-  const GraphGoApp({super.key});
+class MyApp extends StatelessWidget {
+  final SettingsProvider settingsProvider;
+
+  const MyApp({super.key, required this.settingsProvider});
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => DeliveryProvider()..initialize(),
-      child: MaterialApp.router(
-        title: 'GraphGo - Route Optimization',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-          useMaterial3: true,
-        ),
-        routerConfig: _router,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => GraphProvider()),
+        ChangeNotifierProvider(create: (_) => DeliveryProvider()),
+        ChangeNotifierProvider.value(value: settingsProvider),
+      ],
+      child: Consumer<SettingsProvider>(
+        builder: (context, settings, child) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: "GraphGo",
+            themeMode: settings.darkMode ? ThemeMode.dark : ThemeMode.light,
+            theme: ThemeData(
+              brightness: Brightness.light,
+              colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.light),
+              appBarTheme: const AppBarTheme(
+                backgroundColor: Color(0xFF0D2B0D),
+                foregroundColor: Colors.white,
+              ),
+              useMaterial3: true,
+            ),
+            darkTheme: ThemeData(
+              brightness: Brightness.dark,
+              colorScheme: ColorScheme.dark(
+                primary: Colors.deepPurple.shade300,
+                surface: Colors.grey.shade800,
+                background: Colors.black, 
+              ),
+              scaffoldBackgroundColor: Colors.black,
+              appBarTheme: const AppBarTheme(
+                backgroundColor: Color(0xFF0D2B0D),
+                foregroundColor: Colors.white,
+              ),
+              cardTheme: CardThemeData(
+                color: Colors.grey[850],
+                elevation: 2,
+              ),
+              useMaterial3: true,
+            ),
+            initialRoute: "/",
+            routes: {
+              "/": (context) => const HomeScreen(),
+              "/login": (context) => const LoginPage(),
+              "/signup": (context) => const SignupPage(),
+              "/forgot": (context) => const ForgotPasswordPage(),
+              "/map": (context) => const MapScreen(), 
+              "/settings": (context) => const SettingsScreen(),
+              "/profile": (context) => const ProfileScreen(),
+            },
+          );
+        },
       ),
     );
   }
 }
-
-final GoRouter _router = GoRouter(
-  redirect: (BuildContext context, GoRouterState state) {
-    final user = FirebaseAuth.instance.currentUser;
-    final isLoggedIn = user != null;
-    final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
-    
-    // If user is logged in and trying to access login/signup pages, redirect to home
-    if (isLoggedIn && isLoggingIn) {
-      return '/';
-    }
-    
-    // No automatic redirect to login - let the home screen handle it
-    return null; // No redirect needed
-  },
-  routes: <RouteBase>[
-    GoRoute(
-      path: '/',
-      builder: (BuildContext context, GoRouterState state) {
-        return const HomeScreen();
-      },
-      routes: <RouteBase>[
-        GoRoute(
-          path: 'graph',
-          builder: (BuildContext context, GoRouterState state) {
-            return const GraphScreen();
-          },
-        ),
-        GoRoute(
-          path: 'settings',
-          builder: (BuildContext context, GoRouterState state) {
-            return const SettingsScreen();
-          },
-        ),
-        GoRoute(
-          path: 'profile',
-          builder: (BuildContext context, GoRouterState state) {
-            return const ProfileScreen();
-          },
-        ),
-      ],
-    ),
-    GoRoute(
-      path: '/login',
-      builder: (BuildContext context, GoRouterState state) {
-        return const LoginPage();
-      },
-    ),
-    GoRoute(
-      path: '/signup',
-      builder: (BuildContext context, GoRouterState state) {
-        return const SignupPage();
-      },
-    ),
-  ],
-);

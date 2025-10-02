@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/settings_provider.dart'; // Import SettingsProvider
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -8,20 +10,33 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _darkMode = false;
-  double _nodeSize = 20.0;
-  double _edgeWidth = 2.0;
-  Color _nodeColor = Colors.blue;
-  Color _edgeColor = Colors.grey;
+  // State variables for graph visualization have been removed
 
   @override
   Widget build(BuildContext context) {
+    final settingsProvider = Provider.of<SettingsProvider>(context);
+    final bool darkMode = settingsProvider.darkMode;
+
+    final ThemeData currentTheme = Theme.of(context);
+    // Colors will now be primarily driven by MaterialApp's theme/darkTheme
+    // but we can still make specific overrides or use theme colors directly.
+
+    final Color primaryTextColor = darkMode ? Colors.white : Colors.black87;
+    final Color secondaryTextColor = darkMode ? Colors.grey[400]! : Colors.grey[600]!;
+    final Color iconColor = darkMode ? Colors.white70 : Colors.black54;
+    final Color sliderActiveColor = darkMode ? Colors.deepPurple.shade300 : Colors.deepPurple;
+    final Color cardBackgroundColor = darkMode ? Colors.grey[850]! : currentTheme.cardColor;
+
     return Scaffold(
+      // Scaffold background color will be handled by MaterialApp theme
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Settings'),
+        backgroundColor: const Color(0xFF0D2B0D),
+        title: const Text(
+          'Settings',
+          style: TextStyle(color: Colors.white),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -29,6 +44,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Card(
+            color: cardBackgroundColor, 
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -36,103 +52,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text(
                     'Appearance',
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: currentTheme.textTheme.titleLarge?.copyWith(color: primaryTextColor),
                   ),
                   const SizedBox(height: 16),
                   SwitchListTile(
-                    title: const Text('Dark Mode'),
-                    subtitle: const Text('Toggle dark theme'),
-                    value: _darkMode,
+                    title: Text('Dark Mode', style: TextStyle(color: primaryTextColor)),
+                    subtitle: Text('Toggle dark theme', style: TextStyle(color: secondaryTextColor)),
+                    value: darkMode, // Use value from provider
                     onChanged: (value) {
-                      setState(() {
-                        _darkMode = value;
-                      });
+                      settingsProvider.toggleDarkMode(); // Call provider method
                     },
+                    activeColor: sliderActiveColor,
                   ),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Graph Visualization',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16),
-                  ListTile(
-                    title: const Text('Node Size'),
-                    subtitle: Text('${_nodeSize.round()}px'),
-                    trailing: SizedBox(
-                      width: 200,
-                      child: Slider(
-                        value: _nodeSize,
-                        min: 10,
-                        max: 50,
-                        divisions: 40,
-                        onChanged: (value) {
-                          setState(() {
-                            _nodeSize = value;
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                  ListTile(
-                    title: const Text('Edge Width'),
-                    subtitle: Text('${_edgeWidth.round()}px'),
-                    trailing: SizedBox(
-                      width: 200,
-                      child: Slider(
-                        value: _edgeWidth,
-                        min: 1,
-                        max: 10,
-                        divisions: 9,
-                        onChanged: (value) {
-                          setState(() {
-                            _edgeWidth = value;
-                          });
-                        },
-                      ),
-                    ),
-                  ),
-                  ListTile(
-                    title: const Text('Node Color'),
-                    trailing: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: _nodeColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.grey),
-                      ),
-                    ),
-                    onTap: () => _showColorPicker(context, true),
-                  ),
-                  ListTile(
-                    title: const Text('Edge Color'),
-                    trailing: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: _edgeColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.grey),
-                      ),
-                    ),
-                    onTap: () => _showColorPicker(context, false),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          // The "Graph Visualization" card has been completely removed.
           const SizedBox(height: 16),
           Card(
+            color: cardBackgroundColor,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -140,18 +80,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text(
                     'About',
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: currentTheme.textTheme.titleLarge?.copyWith(color: primaryTextColor),
                   ),
                   const SizedBox(height: 16),
-                  const ListTile(
-                    leading: Icon(Icons.info),
-                    title: Text('Version'),
-                    subtitle: Text('1.0.0'),
+                  ListTile(
+                    leading: Icon(Icons.info, color: iconColor),
+                    title: Text('Version', style: TextStyle(color: primaryTextColor)),
+                    subtitle: Text('1.0.0', style: TextStyle(color: secondaryTextColor)),
                   ),
-                  const ListTile(
-                    leading: Icon(Icons.code),
-                    title: Text('Built with Flutter'),
-                    subtitle: Text('GraphGo - Graph Visualization App'),
+                  ListTile(
+                    leading: Icon(Icons.code, color: iconColor),
+                    title: Text('Built with Flutter', style: TextStyle(color: primaryTextColor)),
+                    subtitle: Text('GraphGo - Graph Visualization App', style: TextStyle(color: secondaryTextColor)),
                   ),
                 ],
               ),
@@ -162,59 +102,5 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showColorPicker(BuildContext context, bool isNodeColor) {
-    final List<Color> colors = [
-      Colors.red,
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.teal,
-      Colors.pink,
-      Colors.indigo,
-    ];
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(isNodeColor ? 'Select Node Color' : 'Select Edge Color'),
-          content: SizedBox(
-            width: 300,
-            child: GridView.builder(
-              shrinkWrap: true,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-              ),
-              itemCount: colors.length,
-              itemBuilder: (context, index) {
-                final color = colors[index];
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      if (isNodeColor) {
-                        _nodeColor = color;
-                      } else {
-                        _edgeColor = color;
-                      }
-                    });
-                    Navigator.of(context).pop();
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: color,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.grey),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
+  // _showColorPicker method has been removed as it's no longer needed.
 }

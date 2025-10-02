@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:go_router/go_router.dart';
-import 'services/google_auth_service.dart';
-import 'colors.dart';
+import '../services/google_auth_service.dart';
+import '../colors.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -26,7 +25,7 @@ class _SignupPageState extends State<SignupPage> {
     if (value.length < 12) return "Password must be at least 12 characters.";
     if (!RegExp(r'[A-Z]').hasMatch(value)) return "Must contain 1 uppercase letter.";
     if (!RegExp(r'\d').hasMatch(value)) return "Must contain 1 number.";
-    if (!RegExp(r'[!@#$%^&*(),.?\":{}|<>]').hasMatch(value)) return "Must contain 1 special character.";
+    if (!RegExp(r'[!@#\$%^&*(),.?\":{}|<>]').hasMatch(value)) return "Must contain 1 special character.";
     return null;
   }
 
@@ -49,16 +48,18 @@ class _SignupPageState extends State<SignupPage> {
         'created_at': Timestamp.now(),
       });
 
-      // Navigate to home and refresh the state
       if (mounted) {
-        context.go('/');
+        // After signing up, go to the map screen
+        Navigator.of(context).pushReplacementNamed('/map');
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Signup Failed: ${e.toString()}")),
       );
     } finally {
-      setState(() => _isLoading = false);
+      if(mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -66,32 +67,21 @@ class _SignupPageState extends State<SignupPage> {
     setState(() => _isLoading = true);
 
     try {
-      final UserCredential? userCredential = await GoogleAuthService.signInWithGoogle();
-      
-      // Check if user is signed in (either through successful credential or error handling)
+      await GoogleAuthService.signInWithGoogle();
       final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        if (mounted) {
-          context.go('/');
-        }
-      } else if (userCredential == null) {
-        // Handle the case where Google Sign-In had issues but user might still be signed in
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Google Sign-In had issues, but you might still be signed in")),
-        );
-        // Check again after a short delay
-        await Future.delayed(const Duration(seconds: 1));
-        final userAfterDelay = FirebaseAuth.instance.currentUser;
-        if (userAfterDelay != null && mounted) {
-          context.go('/');
-        }
+      if (user != null && mounted) {
+        Navigator.of(context).pushReplacementNamed('/map');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Google Sign-Up Failed: ${e.toString()}")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Google Sign-Up Failed: ${e.toString()}")),
+        );
+      }
     } finally {
-      setState(() => _isLoading = false);
+       if(mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -100,26 +90,14 @@ class _SignupPageState extends State<SignupPage> {
     final bool isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'GraphGo Sign Up',
-          style: TextStyle(
-            fontFamily: 'Impact', // Ensure "Impact" is available in your fonts
-            fontSize: 24, // Adjust size as needed
-            fontStyle: FontStyle.italic,
-            fontWeight: FontWeight.bold,
-            color: kPrimaryColor,
-          ),
-          ),
+        title: const Text('GraphGo Sign Up'),
+        // The back button is now handled correctly by the Navigator
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/'),
-          tooltip: 'Back to Home',
+          onPressed: () => Navigator.of(context).pop(), // Corrected line
+          tooltip: 'Back to Login',
         ),
-        iconTheme: IconThemeData(
-        color: isDarkMode ? kDarkBackground : kLightBackground,
       ),
-      foregroundColor: isDarkMode ? kDarkBackground : kLightBackground,
-        ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -165,63 +143,31 @@ class _SignupPageState extends State<SignupPage> {
                 validator: (value) => value != _passwordController.text ? "Passwords do not match" : null,
               ),
               const SizedBox(height: 20),
-              
-              // Google Sign-In Button
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: _isLoading ? null : _signUpWithGoogle,
-                  icon: const Icon(
-                    Icons.login,
-                    size: 20,
-                    color: Colors.blue,
-                  ),
+                  icon: const Icon(Icons.login, size: 20, color: Colors.blue),
                   label: const Text('Sign up with Google'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
                 ),
               ),
-              
               const SizedBox(height: 16),
-              
-              // Divider
               Row(
                 children: [
                   const Expanded(child: Divider()),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'OR',
-                      style: TextStyle(
-                        color: isDarkMode ? kDarkText : kLightText,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: Text('OR'),
                   ),
                   const Expanded(child: Divider()),
                 ],
               ),
-              
               const SizedBox(height: 16),
-              
-              // Email Sign-Up Button
               _isLoading
                   ? const CircularProgressIndicator()
                   : SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: isDarkMode ? kLightBackground : kDarkBackground,
-                          foregroundColor: isDarkMode ? kDarkBackground : kLightBackground,
-                          padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
                         onPressed: _signUp,
                         child: const Text('Sign Up with Email'),
                       ),

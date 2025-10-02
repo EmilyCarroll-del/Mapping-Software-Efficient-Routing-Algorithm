@@ -14,17 +14,28 @@ dependencies:
   go_router: ^12.1.3
   flutter_svg: ^2.0.9
   provider: ^6.1.1
+
+  # ✅ SharedPrefs for remember me
+  shared_preferences: ^2.2.3
+
+  # ✅ Firebase + Auth + Firestore + Storage
   firebase_core: ^2.24.2
   firebase_auth: ^4.15.3
   cloud_firestore: ^4.13.6
-  geocoding: ^2.1.1
-  http: ^1.1.0
+  firebase_storage: ^11.5.6
+
+  # ✅ Maps + Location
   google_maps_flutter: ^2.5.0
   location: ^5.0.3
-  uuid: ^4.2.1
+  geocoding: ^2.1.1
+
+  # ✅ Google Sign-In
   google_sign_in: ^6.2.1
+
+  # ✅ Extras
+  http: ^1.1.0
+  uuid: ^4.2.1
   image_picker: ^1.0.4
-  firebase_storage: ^11.5.6
 
 dev_dependencies:
   flutter_test:
@@ -37,7 +48,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  
+
   assets:
     - assets/images/
     - assets/icons/

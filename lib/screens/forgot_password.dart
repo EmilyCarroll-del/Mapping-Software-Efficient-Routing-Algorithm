@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:go_router/go_router.dart';
-import 'colors.dart';
+import '../colors.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -31,7 +30,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         SnackBar(content: Text("Password reset failed: ${e.toString()}")),
       );
     } finally {
-      setState(() => _isLoading = false);
+      if(mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -41,25 +42,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Reset Password',
-          style: TextStyle(
-            fontFamily: 'Impact',
-            fontSize: 24,
-            fontStyle: FontStyle.italic,
-            fontWeight: FontWeight.bold,
-            color: kPrimaryColor,
-          ),
-        ),
+        title: const Text('Reset Password'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/login'),
+          // Corrected the navigation to simply go back to the previous page
+          onPressed: () => Navigator.of(context).pop(),
           tooltip: 'Back to Login',
         ),
-        iconTheme: IconThemeData(
-          color: isDarkMode ? kDarkBackground : kLightBackground,
-        ),
-        foregroundColor: isDarkMode ? kDarkBackground : kLightBackground,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -98,10 +87,6 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: isDarkMode ? kLightBackground : kDarkBackground,
                     foregroundColor: isDarkMode ? kDarkBackground : kLightBackground,
-                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
                   ),
                   child: const Text('Back to Login'),
                 ),
@@ -152,26 +137,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     ? const CircularProgressIndicator()
                     : ElevatedButton(
                         onPressed: _resetPassword,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: isDarkMode ? kLightBackground : kDarkBackground,
-                          foregroundColor: isDarkMode ? kDarkBackground : kLightBackground,
-                          padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
                         child: const Text('Send Reset Email'),
                       ),
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  style: TextButton.styleFrom(
-                    foregroundColor: isDarkMode ? kLightBackground : kDarkBackground,
-                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
                   child: const Text('Back to Login'),
                 ),
               ],
