@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'firebase_options.dart';
 
@@ -8,15 +9,17 @@ import 'firebase_options.dart';
 import 'providers/graph_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/delivery_provider.dart';
+import 'providers/auth_provider.dart';
 
 // Screens
 import 'screens/home_screen.dart';
-import 'screens/map_screen.dart'; 
+import 'screens/map_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/login.dart';
 import 'screens/signup.dart';
 import 'screens/forgot_password.dart';
+import 'screens/admin_dashboard_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +43,7 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => GraphProvider()),
         ChangeNotifierProvider(create: (_) => DeliveryProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider.value(value: settingsProvider),
       ],
       child: Consumer<SettingsProvider>(
@@ -62,7 +66,7 @@ class MyApp extends StatelessWidget {
               colorScheme: ColorScheme.dark(
                 primary: Colors.deepPurple.shade300,
                 surface: Colors.grey.shade800,
-                background: Colors.black, 
+                background: Colors.black,
               ),
               scaffoldBackgroundColor: Colors.black,
               appBarTheme: const AppBarTheme(
@@ -75,13 +79,12 @@ class MyApp extends StatelessWidget {
               ),
               useMaterial3: true,
             ),
-            initialRoute: "/",
+            home: kIsWeb ? const AdminDashboardScreen() : const HomeScreen(),
             routes: {
-              "/": (context) => const HomeScreen(),
               "/login": (context) => const LoginPage(),
               "/signup": (context) => const SignupPage(),
               "/forgot": (context) => const ForgotPasswordPage(),
-              "/map": (context) => const MapScreen(), 
+              "/map": (context) => const MapScreen(),
               "/settings": (context) => const SettingsScreen(),
               "/profile": (context) => const ProfileScreen(),
             },

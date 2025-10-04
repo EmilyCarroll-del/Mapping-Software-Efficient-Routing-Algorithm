@@ -17,7 +17,7 @@ class GoogleAuthService {
   static Future<UserCredential?> signInWithGoogle() async {
     try {
       print('Starting Google Sign-In...');
-      
+
       // Trigger the authentication flow
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       
@@ -32,8 +32,6 @@ class GoogleAuthService {
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       
       print('Google auth tokens obtained');
-      print('Access token: ${googleAuth.accessToken?.substring(0, 20)}...');
-      print('ID token: ${googleAuth.idToken?.substring(0, 20)}...');
 
       // Create a new credential
       final credential = GoogleAuthProvider.credential(
@@ -62,19 +60,6 @@ class GoogleAuthService {
     } catch (e) {
       print('Google Sign-In Error Details: $e');
       print('Error type: ${e.runtimeType}');
-      
-      // Handle specific type casting errors
-      if (e.toString().contains('PigeonUserDetails')) {
-        print('Type casting error detected - this is a known issue with google_sign_in package');
-        // Check if user is actually signed in despite the error
-        final user = _auth.currentUser;
-        if (user != null) {
-          print('User is already signed in: ${user.email}');
-          // Return null to indicate success but let the app handle the state
-          return null;
-        }
-      }
-      
       rethrow;
     }
   }
