@@ -16,6 +16,16 @@ class FirestoreService {
     return _db.collection(_collectionPath).doc(address.id).set(address.toJson());
   }
 
+  // Save a list of addresses from a CSV
+  Future<void> saveAddressesFromCsv(List<DeliveryAddress> addresses) async {
+    final batch = _db.batch();
+    for (final address in addresses) {
+      final docRef = _db.collection(_collectionPath).doc(address.id);
+      batch.set(docRef, address.toJson());
+    }
+    await batch.commit();
+  }
+
   // Delete an address
   Future<void> deleteAddress(String addressId) {
     return _db.collection(_collectionPath).doc(addressId).delete();

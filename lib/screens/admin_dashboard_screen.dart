@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:csv/csv.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -46,6 +49,74 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  Future<void> _showUploadCsvDialog() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+      );
+
+      if (result == null || !mounted) return;
+
+      final file = result.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) return;
+
+      final content = utf8.decode(bytes);
+      final list = const CsvToListConverter().convert(content);
+
+      if (list.isNotEmpty) {
+        list.removeAt(0); // remove header
+      }
+
+      final addresses = list.map((row) {
+        try {
+          return DeliveryAddress(
+            streetAddress: row[0].toString(),
+            city: row[1].toString(),
+            state: row[2].toString(),
+            zipCode: row[3].toString(),
+            notes: row.length > 4 ? row[4].toString() : null,
+          );
+        } catch (e) {
+          print('Error parsing row: $row, error: $e');
+          return null;
+        }
+      }).where((address) => address != null).cast<DeliveryAddress>().toList();
+
+      if (!mounted) return; // Check if the widget is still in the tree
+
+      if (addresses.isNotEmpty) {
+        try {
+          await _firestoreService.saveAddressesFromCsv(addresses);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Addresses uploaded successfully!')),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error uploading addresses: $e')),
+            );
+          }
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No valid addresses found in the CSV file.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking file: $e')),
+        );
+      }
+    }
+  }
+
   void _deleteAddress(String addressId) {
     _firestoreService.deleteAddress(addressId);
   }
@@ -61,6 +132,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         password: _passwordController.text.trim(),
       );
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Login Failed: ${e.message}")),
       );
@@ -139,7 +211,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
               const SizedBox(width: 16),
               OutlinedButton.icon(
-                onPressed: null, // Disabled for now
+                onPressed: _showUploadCsvDialog,
                 icon: const Icon(Icons.upload_file),
                 label: const Text('Upload CSV'),
                 style: OutlinedButton.styleFrom(

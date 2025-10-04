@@ -1,9 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'dart:io';
 import '../colors.dart';
 import '../services/google_auth_service.dart';
 
@@ -18,15 +19,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   User? _user;
   bool _isLoading = false;
   bool _isEditing = false;
-  
+
   // Profile editing controllers
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
   final TextEditingController _companyController = TextEditingController();
-  
+
   String? _profileImageUrl;
-  File? _selectedImage;
+  XFile? _selectedImage;
+  Uint8List? _selectedImageBytes;
 
   // GraphGo specific stats
   int _totalRoutes = 0;
@@ -80,9 +82,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       print('Error loading user data: $e');
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -126,12 +130,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           totalEfficiency += (routeData['efficiency'] ?? 0.0).toDouble();
         }
 
-        setState(() {
-          _totalRoutes = totalRoutes;
-          _totalDeliveries = totalDeliveries;
-          _totalDistance = totalDistance;
-          _averageEfficiency = totalRoutes > 0 ? totalEfficiency / totalRoutes : 0.0;
-        });
+        if (mounted) {
+          setState(() {
+            _totalRoutes = totalRoutes;
+            _totalDeliveries = totalDeliveries;
+            _totalDistance = totalDistance;
+            _averageEfficiency = totalRoutes > 0 ? totalEfficiency / totalRoutes : 0.0;
+          });
+        }
       }
     } catch (e) {
       print('Error loading user stats: $e');
@@ -149,12 +155,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
 
       if (image != null) {
+        final bytes = await image.readAsBytes();
         setState(() {
-          _selectedImage = File(image.path);
+          _selectedImage = image;
+          _selectedImageBytes = bytes;
         });
       }
     } catch (e) {
       print('Error picking image: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error selecting image: $e')),
       );
@@ -162,7 +171,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _uploadProfileImage() async {
-    if (_selectedImage == null) return;
+    if (_selectedImage == null || _selectedImageBytes == null) return;
 
     try {
       setState(() {
@@ -175,24 +184,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .child('profile_images')
           .child(fileName);
 
-      UploadTask uploadTask = storageRef.putFile(_selectedImage!);
+      UploadTask uploadTask = storageRef.putData(_selectedImageBytes!); 
       TaskSnapshot snapshot = await uploadTask;
       String downloadUrl = await snapshot.ref.getDownloadURL();
 
-      setState(() {
-        _profileImageUrl = downloadUrl;
-      });
+      if (mounted) {
+        setState(() {
+          _profileImageUrl = downloadUrl;
+        });
+      }
 
       print('✅ Profile image uploaded: $downloadUrl');
     } catch (e) {
       print('Error uploading profile image: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error uploading image: $e')),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -203,7 +217,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
 
       // Upload profile image if selected
-      if (_selectedImage != null) {
+      if (_selectedImageBytes != null) {
         await _uploadProfileImage();
       }
 
@@ -220,25 +234,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      setState(() {
-        _isEditing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isEditing = false;
+        });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Profile updated successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Profile updated successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       print('Error saving profile: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error saving profile: $e')),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -280,7 +299,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(
@@ -320,7 +338,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               setState(() {
                 _isEditing = !_isEditing;
                 if (!_isEditing) {
-                  // Reset to original values
+                  _selectedImage = null;
+                  _selectedImageBytes = null;
                   _loadUserData();
                 }
               });
@@ -345,12 +364,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         CircleAvatar(
                           radius: 60,
-                          backgroundImage: _selectedImage != null
-                              ? FileImage(_selectedImage!)
+                          backgroundImage: _selectedImageBytes != null
+                              ? MemoryImage(_selectedImageBytes!)
                               : (_profileImageUrl != null
                                   ? NetworkImage(_profileImageUrl!) as ImageProvider
                                   : null),
-                          child: _selectedImage == null && _profileImageUrl == null
+                          child: _selectedImageBytes == null && _profileImageUrl == null
                               ? const Icon(Icons.person, size: 60)
                               : null,
                         ),
@@ -375,7 +394,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  
+
                   // User Name
                   if (_isEditing)
                     TextField(
@@ -398,7 +417,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                  
+
                   // User Email
                   Text(
                     _user?.email ?? 'No email',
@@ -410,9 +429,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             // GraphGo Statistics
             Card(
               child: Padding(
@@ -434,7 +453,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    
+
                     Row(
                       children: [
                         _buildStatCard(
@@ -467,9 +486,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Profile Details
             Card(
               child: Padding(
@@ -485,7 +504,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Company
                     Row(
                       children: [
@@ -513,9 +532,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ],
                     ),
-                    
+
                     const SizedBox(height: 16),
-                    
+
                     // Phone Number
                     Row(
                       children: [
@@ -543,9 +562,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ],
                     ),
-                    
+
                     const SizedBox(height: 16),
-                    
+
                     // Bio
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -579,16 +598,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             // Action Buttons
             Row(
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () {
-                      // Navigate to route history
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Route history coming soon!')),
                       );
