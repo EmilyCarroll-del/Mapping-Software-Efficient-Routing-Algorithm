@@ -11,9 +11,11 @@ import 'screens/profile_screen.dart';
 import 'providers/delivery_provider.dart';
 import 'login.dart';
 import 'signup.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

@@ -53,7 +53,11 @@ void main() {
         // Arrange
         final address = DeliveryAddress(
           id: 'test-id',
-          fullAddress: '123 Test St, Test City',
+          // fullAddress: '123 Test St, Test City',
+          streetAddress: '123 Test St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7128,
           longitude: -74.0060,
         );
@@ -72,7 +76,11 @@ void main() {
         for (int i = 0; i < 100; i++) {
           final address = DeliveryAddress(
             id: 'test-id-$i',
-            fullAddress: '123 Test St $i, Test City',
+            // fullAddress: '123 Test St $i, Test City',
+            streetAddress: '123 Test St $i',
+            city: 'Test City',
+            state: 'NY',
+            zipCode: '10001',
             latitude: 40.7128,
             longitude: -74.0060,
           );
@@ -81,7 +89,11 @@ void main() {
 
         final extraAddress = DeliveryAddress(
           id: 'extra-id',
-          fullAddress: '123 Extra St, Test City',
+          // fullAddress: '123 Extra St, Test City',
+          streetAddress: '123 Extra St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7128,
           longitude: -74.0060,
         );
@@ -99,7 +111,11 @@ void main() {
         // Arrange
         final originalAddress = DeliveryAddress(
           id: 'test-id',
-          fullAddress: '123 Test St, Test City',
+          // fullAddress: '123 Test St, Test City',
+          streetAddress: '123 Test St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7128,
           longitude: -74.0060,
         );
@@ -107,7 +123,11 @@ void main() {
 
         final updatedAddress = DeliveryAddress(
           id: 'test-id',
-          fullAddress: '456 Updated St, Updated City',
+          // fullAddress: '456 Updated St, Updated City',
+          streetAddress: '456 Updated St',
+          city: 'Updated City',
+          state: 'NY',
+          zipCode: '10008',
           latitude: 41.7128,
           longitude: -75.0060,
         );
@@ -125,7 +145,11 @@ void main() {
         // Arrange
         final address = DeliveryAddress(
           id: 'test-id',
-          fullAddress: '123 Test St, Test City',
+          // fullAddress: '123 Test St, Test City',
+          streetAddress: '123 Test St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7128,
           longitude: -74.0060,
         );
@@ -145,19 +169,31 @@ void main() {
         // Add test addresses
         final address1 = DeliveryAddress(
           id: 'addr1',
-          fullAddress: '123 First St, Test City',
+          // fullAddress: '123 First St, Test City',
+          streetAddress: '123 First St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7128,
           longitude: -74.0060,
         );
         final address2 = DeliveryAddress(
           id: 'addr2',
-          fullAddress: '456 Second St, Test City',
+          // fullAddress: '456 Second St, Test City',
+          streetAddress: '456 Second St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7589,
           longitude: -73.9851,
         );
         final address3 = DeliveryAddress(
           id: 'addr3',
-          fullAddress: '789 Third St, Test City',
+          // fullAddress: '789 Third St, Test City',
+          streetAddress: '789 Third St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7505,
           longitude: -73.9934,
         );
@@ -178,9 +214,9 @@ void main() {
         expect(result.name, 'Test Route');
         expect(result.algorithm, RouteAlgorithm.dijkstra);
         expect(result.addresses.length, 3);
-        expect(result.optimizedRoute.length, 3);
+        expect(result.optimizedRoute?.length, 3);
         expect(result.totalDistance, greaterThan(0));
-        expect(result.estimatedTime.inMinutes, greaterThan(0));
+        expect(result.estimatedTime?.inMinutes, greaterThan(0));
       });
 
       test('should optimize route with Nearest Neighbor algorithm', () async {
@@ -194,7 +230,7 @@ void main() {
         expect(result.name, 'NN Route');
         expect(result.algorithm, RouteAlgorithm.nearestNeighbor);
         expect(result.addresses.length, 3);
-        expect(result.optimizedRoute.length, 3);
+        expect(result.optimizedRoute?.length, 3);
       });
 
       test('should throw exception when no addresses available', () async {
@@ -233,7 +269,11 @@ void main() {
         // Arrange
         final invalidAddress = DeliveryAddress(
           id: 'invalid-id',
-          fullAddress: 'Invalid Address That Cannot Be Geocoded',
+          // fullAddress: 'Invalid Address That Cannot Be Geocoded',
+          streetAddress: 'Invalid Address That Cannot Be Geocoded',
+          city: 'Invalid',
+          state: '',
+          zipCode: '',
         );
 
         // Act
@@ -250,7 +290,11 @@ void main() {
         // Arrange
         final address = DeliveryAddress(
           id: 'test-id',
-          fullAddress: '123 Test St, Test City',
+          // fullAddress: '123 Test St, Test City',
+          streetAddress: '123 Test St',
+          city: 'Test City',
+          state: 'NY',
+          zipCode: '10001',
           latitude: 40.7128,
           longitude: -74.0060,
         );

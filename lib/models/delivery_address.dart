@@ -6,8 +6,8 @@ class DeliveryAddress {
   final String city;
   final String state;
   final String zipCode;
-  final double? latitude;
-  final double? longitude;
+  double? latitude;
+  double? longitude;
   final String? notes;
   final DateTime createdAt;
 
