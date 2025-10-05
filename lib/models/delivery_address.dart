@@ -2,6 +2,7 @@ import 'package:uuid/uuid.dart';
 
 class DeliveryAddress {
   final String id;
+  final String userId;
   final String streetAddress;
   final String city;
   final String state;
@@ -13,6 +14,7 @@ class DeliveryAddress {
 
   DeliveryAddress({
     String? id,
+    required this.userId,
     required this.streetAddress,
     required this.city,
     required this.state,
@@ -30,6 +32,7 @@ class DeliveryAddress {
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    'userId': userId,
     'streetAddress': streetAddress,
     'city': city,
     'state': state,
@@ -42,6 +45,7 @@ class DeliveryAddress {
 
   factory DeliveryAddress.fromJson(Map<String, dynamic> json) => DeliveryAddress(
     id: json['id'],
+    userId: json['userId'],
     streetAddress: json['streetAddress'],
     city: json['city'],
     state: json['state'],
@@ -53,6 +57,7 @@ class DeliveryAddress {
   );
 
   DeliveryAddress copyWith({
+    String? userId,
     String? streetAddress,
     String? city,
     String? state,
@@ -62,6 +67,7 @@ class DeliveryAddress {
     String? notes,
   }) => DeliveryAddress(
     id: id,
+    userId: userId ?? this.userId,
     streetAddress: streetAddress ?? this.streetAddress,
     city: city ?? this.city,
     state: state ?? this.state,

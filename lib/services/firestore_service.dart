@@ -5,10 +5,14 @@ class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final String _collectionPath = 'addresses';
 
-  // Get a stream of all addresses
-  Stream<List<DeliveryAddress>> getAddresses() {
-    return _db.collection(_collectionPath).snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
+  // Get a stream of addresses for a specific user
+  Stream<List<DeliveryAddress>> getAddresses(String userId) {
+    return _db
+        .collection(_collectionPath)
+        .where('userId', isEqualTo: userId)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
   }
 
   // Add or update an address

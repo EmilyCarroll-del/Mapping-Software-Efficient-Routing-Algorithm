@@ -3,9 +3,15 @@ import '../models/delivery_address.dart';
 
 class AddEditAddressDialog extends StatefulWidget {
   final DeliveryAddress? address;
+  final String userId;
   final Function(DeliveryAddress) onSave;
 
-  const AddEditAddressDialog({super.key, this.address, required this.onSave});
+  const AddEditAddressDialog({
+    super.key,
+    this.address,
+    required this.userId,
+    required this.onSave,
+  });
 
   @override
   State<AddEditAddressDialog> createState() => _AddEditAddressDialogState();
@@ -98,6 +104,7 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
     if (_formKey.currentState!.validate()) {
       final address = DeliveryAddress(
         id: widget.address?.id, // Keep original ID if editing
+        userId: widget.userId,
         streetAddress: _streetController.text,
         city: _cityController.text,
         state: _stateController.text,

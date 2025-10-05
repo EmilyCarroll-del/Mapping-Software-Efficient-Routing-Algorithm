@@ -40,16 +40,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   void _showAddEditAddressDialog({DeliveryAddress? address}) {
+    if (_user == null) return;
     showDialog(
       context: context,
       builder: (context) => AddEditAddressDialog(
         address: address,
-        onSave: (address) => _firestoreService.saveAddress(address),
+        userId: _user!.uid,
+        onSave: (address) {
+          _firestoreService.saveAddress(address);
+        },
       ),
     );
   }
 
   Future<void> _showUploadCsvDialog() async {
+    if (_user == null) return;
+
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -72,6 +78,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final addresses = list.map((row) {
         try {
           return DeliveryAddress(
+            userId: _user!.uid,
             streetAddress: row[0].toString(),
             city: row[1].toString(),
             state: row[2].toString(),
@@ -194,6 +201,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildLoggedInView(BuildContext context) {
+    if (_user == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
@@ -229,7 +239,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: AddressList(
               onEdit: (address) => _showAddEditAddressDialog(address: address),
               onDelete: _deleteAddress,
-              addressesStream: _firestoreService.getAddresses(),
+              addressesStream: _firestoreService.getAddresses(_user!.uid),
             ),
           ),
           const SizedBox(height: 16),
