@@ -35,6 +35,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         setState(() {
           _user = user;
         });
+
+        if (user == null) {
+          Navigator.of(context).pushReplacementNamed('/login');
+        }
       }
     });
   }

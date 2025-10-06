@@ -79,7 +79,7 @@ class MyApp extends StatelessWidget {
               ),
               useMaterial3: true,
             ),
-            home: kIsWeb ? const AdminDashboardScreen() : const HomeScreen(),
+            home: kIsWeb ? const LoginPage() : const HomeScreen(),
             routes: {
               "/login": (context) => const LoginPage(),
               "/signup": (context) => const SignupPage(),
@@ -87,6 +87,7 @@ class MyApp extends StatelessWidget {
               "/map": (context) => const MapScreen(),
               "/settings": (context) => const SettingsScreen(),
               "/profile": (context) => const ProfileScreen(),
+              "/adminDashboard": (context) => const AdminDashboardScreen(),
             },
           );
         },
