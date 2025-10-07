@@ -1,9 +1,12 @@
+// lib/screens/graph_screen.dart
+import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/graph_provider.dart';
-import '../providers/delivery_provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-// import '../models/delivery_address.dart';
+import 'package:provider/provider.dart';
+
+import '../providers/delivery_provider.dart';
+import '../providers/graph_provider.dart';
+import '../providers/route_provider.dart';
 
 class GraphScreen extends StatefulWidget {
   const GraphScreen({super.key});
@@ -13,273 +16,172 @@ class GraphScreen extends StatefulWidget {
 }
 
 class _GraphScreenState extends State<GraphScreen> {
-  bool _isLoading = false;
-  String _statusMessage = "";
-  List<int> _samplePath = [];
-  int _totalNodes = 0;
+  GoogleMapController? _map;
 
-  GoogleMapController? _mapController;
-  final Set<Marker> _markers = {};
-  final Set<Polyline> _polylines = {};
+  // Fallback camera (NYC). The map will auto-fit after a route is drawn.
+  final CameraPosition _initial = const CameraPosition(
+    target: LatLng(40.7128, -74.0060),
+    zoom: 12,
+  );
+
+  Future<void> _fitToPolyline(List<LatLng> pts) async {
+    if (_map == null || pts.isEmpty) return;
+
+    double minLat = pts.first.latitude, maxLat = pts.first.latitude;
+    double minLng = pts.first.longitude, maxLng = pts.first.longitude;
+
+    for (final p in pts) {
+      minLat = min(minLat, p.latitude);
+      maxLat = max(maxLat, p.latitude);
+      minLng = min(minLng, p.longitude);
+      maxLng = max(maxLng, p.longitude);
+    }
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+
+    await _map!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 64));
+  }
 
   @override
   Widget build(BuildContext context) {
-    final deliveryProvider = Provider.of<DeliveryProvider>(context);
-    final graphProvider = Provider.of<GraphProvider>(context);
+    // Only watch the RouteProvider so the map updates when the route changes.
+    final routeProv = context.watch<RouteProvider>();
+
+    final polylines = {
+      if (routeProv.routePolyline.isNotEmpty)
+        Polyline(
+          polylineId: const PolylineId('efficient_route'),
+          points: routeProv.routePolyline,
+          width: 6,
+        ),
+    };
+
+    final markers = routeProv.markers.toSet();
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Graph Visualization'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showAddNodeDialog(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              graphProvider.clearGraph();
-            },
-          ),
-        ],
+        title: const Text('Efficient Route & Visualization'),
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: ElevatedButton(
-              onPressed: _isLoading
+          if (routeProv.status.isNotEmpty)
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(routeProv.status),
+            ),
+          Expanded(
+            child: GoogleMap(
+              initialCameraPosition: _initial,
+              onMapCreated: (c) => _map = c,
+              markers: markers,
+              polylines: polylines,
+              myLocationEnabled: true,
+              myLocationButtonEnabled: true,
+              compassEnabled: true,
+            ),
+          ),
+          _bottomBar(context, routeProv),
+        ],
+      ),
+    );
+  }
+
+  Widget _bottomBar(BuildContext context, RouteProvider routeProv) {
+    // We read the other providers INSIDE the handler (no listening) to avoid
+    // recreating/disposing RouteProvider during async work.
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black12)],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                routeProv.totalDistanceMeters == 0
+                    ? 'Distance: —'
+                    : 'Distance: ${(routeProv.totalDistanceMeters / 1000).toStringAsFixed(2)} km',
+              ),
+            ),
+            FilledButton.icon(
+              icon: routeProv.isComputing
+                  ? const SizedBox(
+                height: 16,
+                width: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+                  : const Icon(Icons.route),
+              label: Text(routeProv.isComputing ? 'Building…' : 'Build Efficient Route'),
+              onPressed: routeProv.isComputing
                   ? null
                   : () async {
-                setState(() {
-                  _isLoading = true;
-                  _statusMessage = "Building graph...";
-                  _samplePath = [];
-                  _totalNodes = 0;
-                  _markers.clear();
-                  _polylines.clear();
-                });
+                // READ providers (don’t watch) to prevent rebuilds mid-computation.
+                final graph = context.read<GraphProvider>();
+                final deliveries = context.read<DeliveryProvider>();
+                final routes = context.read<RouteProvider>();
 
+                // Need at least 2 addresses (start + 1 stop).
+                if (deliveries.addresses.length < 2) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Add at least two addresses.')),
+                  );
+                  return;
+                }
+
+                // Build the routing graph (geocode missing coords, distance matrix, digraph).
                 try {
-                  // Build graph from addresses
-                  await graphProvider.buildGraphFromAddresses(
-                      deliveryProvider.addresses);
-
-                  final graph = graphProvider.graph;
-                  if (graph != null) {
-                    setState(() {
-                      _totalNodes = graph.n;
-
-                      if (graph.n >= 2) {
-                        final res =
-                        graphProvider.shortestRoute(0, graph.n - 1);
-                        _samplePath = List<int>.from(res['path']);
-                        _statusMessage =
-                        "Graph built! Nodes: ${graph.n}";
-                      } else {
-                        _statusMessage = "Graph built, but not enough nodes";
-                      }
-
-                      // Optional: markers for all addresses
-                      for (int i = 0; i < deliveryProvider.addresses.length; i++) {
-                        final addr = deliveryProvider.addresses[i];
-                        if (addr.hasCoordinates) {
-                          _markers.add(Marker(
-                            markerId: MarkerId(addr.id),
-                            position: LatLng(addr.latitude!, addr.longitude!),
-                            infoWindow: InfoWindow(title: addr.fullAddress),
-                          ));
-                        }
-                      }
-
-                      // Optional: polyline for sample path
-                      if (_samplePath.isNotEmpty) {
-                        final points = _samplePath
-                            .map((idx) => LatLng(
-                            deliveryProvider.addresses[idx].latitude!,
-                            deliveryProvider.addresses[idx].longitude!))
-                            .toList();
-                        _polylines.add(Polyline(
-                            polylineId: const PolylineId("sample_path"),
-                            points: points,
-                            color: Colors.blue,
-                            width: 4));
-                      }
-                    });
-                  } else {
-                    setState(() {
-                      _statusMessage = "Graph could not be built";
-                    });
-                  }
+                  await graph.buildGraphFromAddresses(deliveries.addresses);
                 } catch (e) {
-                  setState(() {
-                    _statusMessage = "Error building graph: $e";
-                  });
-                } finally {
-                  setState(() {
-                    _isLoading = false;
-                  });
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to build graph: $e')),
+                  );
+                  return;
                 }
-              },
-              child: _isLoading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text("Build Routes"),
-            ),
-          ),
-          Text(_statusMessage),
-          if (_samplePath.isNotEmpty)
-            Text("Sample shortest path: $_samplePath"),
-          if (_totalNodes > 0) Text("Total nodes: $_totalNodes"),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Consumer<GraphProvider>(
-              builder: (context, graphProvider, child) {
-                return graphProvider.nodes.isEmpty
-                    ? _buildEmptyGraphPlaceholder()
-                    : CustomPaint(
-                  painter: GraphPainter(
-                      graphProvider.nodes, graphProvider.edges),
-                  child: Container(),
+
+                // Start & stops
+                final LatLng start = deliveries.startLocation ??
+                    (routes.markers.isNotEmpty
+                        ? routes.markers.first.position
+                        : _initial.target);
+                final List<LatLng> stops = deliveries.stops;
+
+                if (stops.isEmpty) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Add at least one stop.')),
+                  );
+                  return;
+                }
+
+                // Compute efficient route and draw
+                await routes.computeEfficientRoute(
+                  start: start,
+                  stops: stops,
+                  improveWith2Opt: true,
                 );
-              },
-            ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddNodeDialog(context),
-        tooltip: 'Add Node',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
 
-  Widget _buildEmptyGraphPlaceholder() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.account_tree_outlined,
-            size: 80,
-            color: Colors.grey[400],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No graph data yet',
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(color: Colors.grey[600]),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Add nodes to start building your graph or use "Build Routes"',
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(color: Colors.grey[500]),
-          ),
-        ],
-      ),
-    );
-  }
+                if (!mounted) return;
+                await _fitToPolyline(routes.routePolyline);
 
-  void _showAddNodeDialog(BuildContext context) {
-    final TextEditingController controller = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Add Node'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(
-              hintText: 'Enter node label',
-            ),
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (controller.text.isNotEmpty) {
-                  Provider.of<GraphProvider>(context, listen: false)
-                      .addNode(controller.text);
-                  Navigator.of(context).pop();
+                if (routes.routePolyline.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No path found between some stops.')),
+                  );
                 }
               },
-              child: const Text('Add'),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
-}
-
-class GraphPainter extends CustomPainter {
-  final List<GraphNode> nodes;
-  final List<GraphEdge> edges;
-
-  GraphPainter(this.nodes, this.edges);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint nodePaint = Paint()
-      ..color = Colors.blue
-      ..style = PaintingStyle.fill;
-
-    final Paint edgePaint = Paint()
-      ..color = Colors.grey
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke;
-
-    for (final edge in edges) {
-      final startNode = nodes.firstWhere((n) => n.id == edge.fromId);
-      final endNode = nodes.firstWhere((n) => n.id == edge.toId);
-
-      canvas.drawLine(
-        Offset(startNode.x, startNode.y),
-        Offset(endNode.x, endNode.y),
-        edgePaint,
-      );
-    }
-
-    for (final node in nodes) {
-      canvas.drawCircle(
-        Offset(node.x, node.y),
-        20,
-        nodePaint,
-      );
-
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: node.label,
-          style: const TextStyle(color: Colors.white, fontSize: 12),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(
-          node.x - textPainter.width / 2,
-          node.y - textPainter.height / 2,
-        ),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

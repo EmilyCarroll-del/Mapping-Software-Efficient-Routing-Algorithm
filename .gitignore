@@ -44,6 +44,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+node_modules/
+package-lock.json
+
+
+
 # iOS related
 **/ios/**/*.mode1v3
 **/ios/**/*.mode2v3

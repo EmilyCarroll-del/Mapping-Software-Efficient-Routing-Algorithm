@@ -3,22 +3,29 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import 'firebase_options.dart';
+
 import 'screens/home_screen.dart';
 import 'screens/graph_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/addresses_screen.dart';
+
 import 'providers/delivery_provider.dart';
+import 'providers/graph_provider.dart';
+import 'providers/route_provider.dart';
+
 import 'login.dart';
 import 'signup.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await dotenv.load(fileName: ".env");
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   runApp(const GraphGoApp());
 }
 
@@ -27,9 +34,20 @@ class GraphGoApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => DeliveryProvider()..initialize(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => DeliveryProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => GraphProvider()),
+        // Important: don't recreate RouteProvider on updates
+        ChangeNotifierProvider(
+          create: (ctx) => RouteProvider(
+            graph: ctx.read<GraphProvider>(),
+            deliveries: ctx.read<DeliveryProvider>(),
+          ),
+        ),
+      ],
       child: MaterialApp.router(
+        debugShowCheckedModeBanner: false,
         title: 'GraphGo - Route Optimization',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
@@ -42,57 +60,52 @@ class GraphGoApp extends StatelessWidget {
 }
 
 final GoRouter _router = GoRouter(
+  // ⬇️ Start on HOME, not /graph
+  initialLocation: '/',
   redirect: (BuildContext context, GoRouterState state) {
     final user = FirebaseAuth.instance.currentUser;
     final isLoggedIn = user != null;
-    final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
-    
-    // If user is logged in and trying to access login/signup pages, redirect to home
-    if (isLoggedIn && isLoggingIn) {
-      return '/';
-    }
-    
-    // No automatic redirect to login - let the home screen handle it
-    return null; // No redirect needed
+    final isLoggingIn =
+        state.matchedLocation == '/login' || state.matchedLocation == '/signup';
+
+    if (isLoggedIn && isLoggingIn) return '/';
+    return null;
   },
   routes: <RouteBase>[
     GoRoute(
       path: '/',
-      builder: (BuildContext context, GoRouterState state) {
-        return const HomeScreen();
-      },
+      builder: (BuildContext context, GoRouterState state) => const HomeScreen(),
       routes: <RouteBase>[
         GoRoute(
           path: 'graph',
-          builder: (BuildContext context, GoRouterState state) {
-            return const GraphScreen();
-          },
+          builder: (BuildContext context, GoRouterState state) => const GraphScreen(),
+        ),
+        GoRoute(
+          path: 'addresses',
+          builder: (BuildContext context, GoRouterState state) => const AddressesScreen(),
         ),
         GoRoute(
           path: 'settings',
-          builder: (BuildContext context, GoRouterState state) {
-            return const SettingsScreen();
-          },
+          builder: (BuildContext context, GoRouterState state) => const SettingsScreen(),
         ),
         GoRoute(
           path: 'profile',
-          builder: (BuildContext context, GoRouterState state) {
-            return const ProfileScreen();
-          },
+          builder: (BuildContext context, GoRouterState state) => const ProfileScreen(),
+        ),
+        // keep if anything links to /route-map; show GraphScreen
+        GoRoute(
+          path: 'route-map',
+          builder: (BuildContext context, GoRouterState state) => const GraphScreen(),
         ),
       ],
     ),
     GoRoute(
       path: '/login',
-      builder: (BuildContext context, GoRouterState state) {
-        return const LoginPage();
-      },
+      builder: (BuildContext context, GoRouterState state) => const LoginPage(),
     ),
     GoRoute(
       path: '/signup',
-      builder: (BuildContext context, GoRouterState state) {
-        return const SignupPage();
-      },
+      builder: (BuildContext context, GoRouterState state) => const SignupPage(),
     ),
   ],
 );

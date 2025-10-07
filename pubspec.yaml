@@ -20,6 +20,7 @@ dependencies:
   geocoding: ^2.1.1
   http: ^1.1.0
   google_maps_flutter: ^2.5.0
+  flutter_polyline_points: ^3.1.0
   location: ^5.0.3
   uuid: ^4.2.1
   google_sign_in: ^6.2.1
@@ -40,5 +41,6 @@ flutter:
   uses-material-design: true
   
   assets:
+    - .env
 #    - assets/images/
     - assets/icons/
