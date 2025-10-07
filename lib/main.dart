@@ -20,6 +20,8 @@ import 'screens/login.dart';
 import 'screens/signup.dart';
 import 'screens/forgot_password.dart';
 import 'screens/admin_dashboard_screen.dart';
+import 'screens/assigned_addresses_screen.dart';
+import 'screens/driver_assignments_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -79,7 +81,7 @@ class MyApp extends StatelessWidget {
               ),
               useMaterial3: true,
             ),
-            home: kIsWeb ? const AdminDashboardScreen() : const HomeScreen(),
+            home: kIsWeb ? const LoginPage() : const HomeScreen(),
             routes: {
               "/login": (context) => const LoginPage(),
               "/signup": (context) => const SignupPage(),
@@ -87,6 +89,9 @@ class MyApp extends StatelessWidget {
               "/map": (context) => const MapScreen(),
               "/settings": (context) => const SettingsScreen(),
               "/profile": (context) => const ProfileScreen(),
+              "/admin-dashboard": (context) => const AdminDashboardScreen(),
+              "/assigned-addresses": (context) => AssignedAddressesScreen(),
+              "/driver-assignments": (context) => const DriverAssignmentsScreen(),
             },
           );
         },

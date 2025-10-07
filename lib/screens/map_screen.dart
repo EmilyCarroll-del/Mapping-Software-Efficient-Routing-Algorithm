@@ -3,6 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:location/location.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geocoding/geocoding.dart' as geocoding;
+
+import '../models/delivery_address.dart';
+import '../services/firestore_service.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -13,8 +18,10 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final Completer<GoogleMapController> _controller = Completer();
+  final FirestoreService _firestoreService = FirestoreService();
   LocationData? _currentLocation;
   StreamSubscription<LocationData>? _locationSubscription;
+  Set<Marker> _markers = {};
 
   final User? user = FirebaseAuth.instance.currentUser;
 
@@ -26,29 +33,28 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeLocation();
+    _initializeLocationAndMarkers();
+  }
+
+  Future<void> _initializeLocationAndMarkers() async {
+    await _initializeLocation();
+    if (user != null) {
+      _loadAddressMarkers(user!.uid);
+    }
   }
 
   Future<void> _initializeLocation() async {
     Location location = Location();
-
-    bool serviceEnabled;
-    PermissionStatus permissionGranted;
-
-    serviceEnabled = await location.serviceEnabled();
+    bool serviceEnabled = await location.serviceEnabled();
     if (!serviceEnabled) {
       serviceEnabled = await location.requestService();
-      if (!serviceEnabled) {
-        return;
-      }
+      if (!serviceEnabled) return;
     }
 
-    permissionGranted = await location.hasPermission();
+    PermissionStatus permissionGranted = await location.hasPermission();
     if (permissionGranted == PermissionStatus.denied) {
       permissionGranted = await location.requestPermission();
-      if (permissionGranted != PermissionStatus.granted) {
-        return;
-      }
+      if (permissionGranted != PermissionStatus.granted) return;
     }
 
     _currentLocation = await location.getLocation();
@@ -57,11 +63,43 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     _locationSubscription = location.onLocationChanged.listen((LocationData newLocation) {
-      if(mounted) {
-        setState(() {
-          _currentLocation = newLocation;
-        });
-         _moveCameraToLocation(newLocation);
+      if (mounted) {
+        setState(() => _currentLocation = newLocation);
+        _moveCameraToLocation(newLocation);
+      }
+    });
+  }
+
+  Future<void> _loadAddressMarkers(String userId) async {
+    _firestoreService.getDriverDeliveries(userId).listen((addresses) async {
+      Set<Marker> newMarkers = {};
+      for (var address in addresses) {
+        // Check for null or empty required fields before geocoding
+        if (address.streetAddress.isNotEmpty &&
+            address.city.isNotEmpty &&
+            address.state.isNotEmpty &&
+            address.zipCode.isNotEmpty) {
+          try {
+            List<geocoding.Location> locations = await geocoding.locationFromAddress(
+              '${address.streetAddress}, ${address.city}, ${address.state} ${address.zipCode}'
+            );
+            if (locations.isNotEmpty) {
+              final loc = locations.first;
+              newMarkers.add(
+                Marker(
+                  markerId: MarkerId(address.id),
+                  position: LatLng(loc.latitude, loc.longitude),
+                  infoWindow: InfoWindow(title: address.streetAddress, snippet: address.notes),
+                ),
+              );
+            }
+          } catch (e) {
+            print("Error geocoding address: ${e}");
+          }
+        }
+      }
+      if (mounted) {
+        setState(() => _markers = newMarkers);
       }
     });
   }
@@ -76,6 +114,13 @@ class _MapScreenState extends State<MapScreen> {
     ));
   }
 
+  Future<void> _logout() async {
+    await FirebaseAuth.instance.signOut();
+    if (mounted) {
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (Route<dynamic> route) => false);
+    }
+  }
+
   @override
   void dispose() {
     _locationSubscription?.cancel();
@@ -86,24 +131,25 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Your Location'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        title: const Text("GraphGo Driver"),
+        automaticallyImplyLeading: false,
         actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.of(context).pushNamed('/driver-assignments');
+            },
+            icon: const Icon(Icons.assignment, color: Colors.white),
+            label: const Text('View Assignments', style: TextStyle(color: Colors.white)),
+          ),
           if (user?.email != null)
             Padding(
               padding: const EdgeInsets.only(right: 16.0),
-              child: Center(
-                child: Text(
-                  user!.email!,
-                  style: const TextStyle(
-                    fontSize: 12,
-                  ),
-                ),
-              ),
+              child: Center(child: Text(user!.email!, style: const TextStyle(fontSize: 12))),
             ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _logout,
+          ),
         ],
       ),
       body: _currentLocation == null
@@ -116,14 +162,8 @@ class _MapScreenState extends State<MapScreen> {
               },
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
-              markers: {
-                if (_currentLocation != null)
-                  Marker(
-                    markerId: const MarkerId('currentLocation'),
-                    position: LatLng(_currentLocation!.latitude!, _currentLocation!.longitude!),
-                    infoWindow: const InfoWindow(title: 'My Location'),
-                  ),
-              },
+
+              markers: _markers,
             ),
     );
   }

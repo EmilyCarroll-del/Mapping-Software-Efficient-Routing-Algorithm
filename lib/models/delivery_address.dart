@@ -11,6 +11,8 @@ class DeliveryAddress {
   final double? longitude;
   final String? notes;
   final DateTime createdAt;
+  final String? driverId;
+  final String status;
 
   DeliveryAddress({
     String? id,
@@ -23,6 +25,8 @@ class DeliveryAddress {
     this.longitude,
     this.notes,
     DateTime? createdAt,
+    this.driverId,
+    this.status = 'pending',
   }) : id = id ?? const Uuid().v4(),
        createdAt = createdAt ?? DateTime.now();
 
@@ -41,6 +45,8 @@ class DeliveryAddress {
     'longitude': longitude,
     'notes': notes,
     'createdAt': createdAt.toIso8601String(),
+    'driverId': driverId,
+    'status': status,
   };
 
   factory DeliveryAddress.fromJson(Map<String, dynamic> json) => DeliveryAddress(
@@ -54,6 +60,8 @@ class DeliveryAddress {
     longitude: json['longitude']?.toDouble(),
     notes: json['notes'],
     createdAt: DateTime.parse(json['createdAt']),
+    driverId: json['driverId'],
+    status: json['status'] ?? 'pending',
   );
 
   DeliveryAddress copyWith({
@@ -65,6 +73,8 @@ class DeliveryAddress {
     double? latitude,
     double? longitude,
     String? notes,
+    String? driverId,
+    String? status,
   }) => DeliveryAddress(
     id: id,
     userId: userId ?? this.userId,
@@ -76,5 +86,7 @@ class DeliveryAddress {
     longitude: longitude ?? this.longitude,
     notes: notes ?? this.notes,
     createdAt: createdAt,
+    driverId: driverId ?? this.driverId,
+    status: status ?? this.status,
   );
 }

@@ -33,8 +33,29 @@
 
   <title>graph_go</title>
   <link rel="manifest" href="manifest.json">
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74"></script>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-firestore.js"></script>
+
 </head>
 <body>
+  <script>
+    // Your web app's Firebase configuration
+    var firebaseConfig = {
+      apiKey: "AIzaSyByWSG8ewS_QX2jLfsmO5YsnbKE7HH8HRE",
+      authDomain: "graph-go-bd4f0.firebaseapp.com",
+      projectId: "graph-go-bd4f0",
+      storageBucket: "graph-go-bd4f0.firebasestorage.app",
+      messagingSenderId: "627645762372",
+      appId: "1:627645762372:web:45d648b5ef756be6f2a511",
+      measurementId: "G-DW8MH83H28"
+    };
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
