@@ -8,6 +8,7 @@ import 'screens/home_screen.dart';
 import 'screens/graph_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/driver_assigned_orders_screen.dart';
 import 'providers/delivery_provider.dart';
 import 'login.dart';
 import 'signup.dart';
@@ -76,6 +77,12 @@ final GoRouter _router = GoRouter(
           path: 'profile',
           builder: (BuildContext context, GoRouterState state) {
             return const ProfileScreen();
+          },
+        ),
+        GoRoute(
+          path: 'assigned-orders',
+          builder: (BuildContext context, GoRouterState state) {
+            return const DriverAssignedOrdersScreen();
           },
         ),
       ],
