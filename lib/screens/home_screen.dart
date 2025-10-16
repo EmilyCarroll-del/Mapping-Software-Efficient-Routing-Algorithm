@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:location/location.dart';
 import '../providers/delivery_provider.dart';
 import '../services/firestore_service.dart';
+import '../utils/migrate_deliveries.dart';
 import '../colors.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -502,6 +503,37 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               ],
+                            ),
+                            
+                            // Temporary migration button - remove after migration is complete
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                try {
+                                  await DeliveryMigration.migrateAcceptedAddressesToDeliveries();
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('✅ Migration completed! Check console for details.')),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('❌ Migration failed: $e')),
+                                    );
+                                  }
+                                }
+                              },
+                              icon: const Icon(Icons.sync),
+                              label: const Text('Migrate to Deliveries'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
                             ),
                           ],
                         ),

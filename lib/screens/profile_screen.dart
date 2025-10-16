@@ -123,16 +123,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadUserStats() async {
     try {
       if (_user != null) {
-        // Load completed deliveries from addresses collection
+        // Load completed deliveries from deliveries collection
         QuerySnapshot deliveriesSnapshot = await FirebaseFirestore.instance
-            .collection('addresses')
+            .collection('deliveries')
             .where('driverId', isEqualTo: _user!.uid)
             .where('status', isEqualTo: 'completed')
             .get();
 
         // Load all deliveries (for total count)
         QuerySnapshot allDeliveriesSnapshot = await FirebaseFirestore.instance
-            .collection('addresses')
+            .collection('deliveries')
             .where('driverId', isEqualTo: _user!.uid)
             .get();
 
