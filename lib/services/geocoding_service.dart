@@ -3,6 +3,15 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:math';
 import '../models/delivery_address.dart';
+import '../models/place_suggestion.dart';
+
+// A local, private class to handle Place Details data without external dependencies.
+class ParsedPlace {
+  final double latitude;
+  final double longitude;
+  final Map<String, String> components;
+  ParsedPlace({required this.latitude, required this.longitude, required this.components});
+}
 
 class GeocodingService {
   static const String _googleMapsApiKey = 'AIzaSyD2jr77VpYOfumEdOn2uOlKTwAUY6RbWl8';
@@ -11,9 +20,7 @@ class GeocodingService {
   /// Convert a delivery address to GPS coordinates
   static Future<DeliveryAddress> geocodeAddress(DeliveryAddress address) async {
     try {
-      // First try using the geocoding package
       final locations = await locationFromAddress(address.fullAddress);
-      
       if (locations.isNotEmpty) {
         final location = locations.first;
         return address.copyWith(
@@ -25,7 +32,6 @@ class GeocodingService {
       print('Geocoding package failed: $e');
     }
 
-    // Fallback to Google Geocoding API
     try {
       return await _geocodeWithGoogle(address);
     } catch (e) {
@@ -39,28 +45,87 @@ class GeocodingService {
     List<DeliveryAddress> addresses,
   ) async {
     final results = <DeliveryAddress>[];
-    
     for (final address in addresses) {
       try {
         final geocodedAddress = await geocodeAddress(address);
         results.add(geocodedAddress);
-        
-        // Add delay to avoid rate limiting
         await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         print('Failed to geocode ${address.fullAddress}: $e');
-        results.add(address); // Keep original address if geocoding fails
+        results.add(address);
       }
     }
-    
     return results;
   }
 
-  /// Reverse geocode: convert GPS coordinates to address
+  /// Get Google Places autocomplete suggestions for an input string.
+  static Future<List<PlaceSuggestion>> placeAutocomplete(
+      String input, {
+        String? sessionToken,
+        String country = 'us',
+      }) async {
+    final params = <String, String>{
+      'input': input,
+      'key': _googleMapsApiKey,
+      if (sessionToken != null) 'sessiontoken': sessionToken,
+      'components': 'country:$country',
+    };
+    final uri = Uri.https('maps.googleapis.com', '/maps/api/place/autocomplete/json', params);
+    final res = await http.get(uri);
+    final data = json.decode(res.body);
+
+    final status = data['status'] as String? ?? 'UNKNOWN_ERROR';
+    if (status != 'OK' && status != 'ZERO_RESULTS') {
+      print('Places Autocomplete error: $status  ${data['error_message'] ?? ''}');
+      throw Exception('Places Autocomplete error: $status');
+    }
+
+    final List predictions = data['predictions'] ?? const [];
+    return predictions
+        .map((p) => PlaceSuggestion(
+              description: p['description'] as String,
+              placeId: p['place_id'] as String,
+            ))
+        .toList();
+  }
+
+  /// Get details for a placeId: coordinates + address components.
+  static Future<ParsedPlace> placeDetails(String placeId, {String? sessionToken}) async {
+    final params = <String, String>{
+      'place_id': placeId,
+      'key': _googleMapsApiKey,
+      if (sessionToken != null) 'sessiontoken': sessionToken,
+      'fields': 'address_component,geometry',
+    };
+    final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', params);
+    final res = await http.get(uri);
+    final data = json.decode(res.body);
+
+    final status = data['status'] as String? ?? 'UNKNOWN_ERROR';
+    if (status != 'OK') {
+      throw Exception('Place Details error: $status');
+    }
+
+    final result = data['result'];
+    final loc = result['geometry']['location'];
+    final latitude = (loc['lat'] as num).toDouble();
+    final longitude = (loc['lng'] as num).toDouble();
+
+    final comps = <String, String>{};
+    for (final comp in (result['address_components'] as List)) {
+      final types = (comp['types'] as List).cast<String>();
+      final value = comp['long_name'] as String;
+      for (final t in types) {
+        comps[t] = value;
+      }
+    }
+
+    return ParsedPlace(latitude: latitude, longitude: longitude, components: comps);
+  }
+
   static Future<String> reverseGeocode(double latitude, double longitude) async {
     try {
       final placemarks = await placemarkFromCoordinates(latitude, longitude);
-      
       if (placemarks.isNotEmpty) {
         final placemark = placemarks.first;
         return '${placemark.street}, ${placemark.locality}, ${placemark.administrativeArea} ${placemark.postalCode}';
@@ -68,23 +133,17 @@ class GeocodingService {
     } catch (e) {
       print('Reverse geocoding failed: $e');
     }
-    
     return 'Unknown Location';
   }
 
-  /// Geocode using Google Geocoding API
   static Future<DeliveryAddress> _geocodeWithGoogle(DeliveryAddress address) async {
     final url = Uri.parse('$_googleGeocodingUrl?address=${Uri.encodeComponent(address.fullAddress)}&key=$_googleMapsApiKey');
-    
     final response = await http.get(url);
-    
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-      
       if (data['status'] == 'OK' && data['results'].isNotEmpty) {
         final result = data['results'][0];
         final location = result['geometry']['location'];
-        
         return address.copyWith(
           latitude: location['lat'].toDouble(),
           longitude: location['lng'].toDouble(),
@@ -97,26 +156,18 @@ class GeocodingService {
     }
   }
 
-  /// Validate if an address format is correct
   static bool isValidAddressFormat(String address) {
-    // Basic validation - check if address has minimum required components
     final parts = address.split(',').map((s) => s.trim()).toList();
-    return parts.length >= 2; // At least street and city
+    return parts.length >= 2;
   }
 
-  /// Parse address string into components
   static Map<String, String> parseAddress(String fullAddress) {
     final parts = fullAddress.split(',').map((s) => s.trim()).toList();
-    
-    if (parts.length < 2) {
-      throw Exception('Invalid address format');
-    }
-    
+    if (parts.length < 2) throw Exception('Invalid address format');
     final streetAddress = parts[0];
     final city = parts[1];
     String state = '';
     String zipCode = '';
-    
     if (parts.length >= 3) {
       final stateZip = parts[2].split(' ');
       if (stateZip.length >= 2) {
@@ -126,7 +177,6 @@ class GeocodingService {
         state = parts[2];
       }
     }
-    
     return {
       'streetAddress': streetAddress,
       'city': city,
@@ -135,26 +185,24 @@ class GeocodingService {
     };
   }
 
-  /// Get distance matrix between multiple addresses
   static Future<Map<String, Map<String, double>>> getDistanceMatrix(
     List<DeliveryAddress> addresses,
   ) async {
     final distanceMatrix = <String, Map<String, double>>{};
-    
     for (int i = 0; i < addresses.length; i++) {
       final fromAddress = addresses[i];
       distanceMatrix[fromAddress.id] = <String, double>{};
-      
       for (int j = 0; j < addresses.length; j++) {
         if (i == j) {
           distanceMatrix[fromAddress.id]![addresses[j].id] = 0.0;
         } else {
           final toAddress = addresses[j];
-          
           if (fromAddress.hasCoordinates && toAddress.hasCoordinates) {
             final distance = _calculateHaversineDistance(
-              fromAddress.latitude!, fromAddress.longitude!,
-              toAddress.latitude!, toAddress.longitude!,
+              fromAddress.latitude!,
+              fromAddress.longitude!,
+              toAddress.latitude!,
+              toAddress.longitude!,
             );
             distanceMatrix[fromAddress.id]![toAddress.id] = distance;
           } else {
@@ -163,34 +211,22 @@ class GeocodingService {
         }
       }
     }
-    
     return distanceMatrix;
   }
 
-  /// Calculate Haversine distance between two GPS coordinates
   static double _calculateHaversineDistance(
-    double lat1, double lon1,
-    double lat2, double lon2,
+    double lat1, double lon1, double lat2, double lon2,
   ) {
-    const double earthRadius = 6371; // Earth's radius in kilometers
-    
-    final dLat = _degreesToRadians(lat2 - lat1);
-    final dLon = _degreesToRadians(lon2 - lon1);
-    
+    const double earthRadius = 6371;
+    final dLat = (lat2 - lat1).toRadians();
+    final dLon = (lon2 - lon1).toRadians();
     final a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(lat1.toRadians()) * cos(lat2.toRadians()) *
-        sin(dLon / 2) * sin(dLon / 2);
-    
+        cos(lat1.toRadians()) * cos(lat2.toRadians()) * sin(dLon / 2) * sin(dLon / 2);
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    
     return earthRadius * c;
-  }
-
-  static double _degreesToRadians(double degrees) {
-    return degrees * (3.14159265359 / 180);
   }
 }
 
 extension DoubleExtensions on double {
-  double toRadians() => this * (3.14159265359 / 180);
+  double toRadians() => this * (pi / 180);
 }

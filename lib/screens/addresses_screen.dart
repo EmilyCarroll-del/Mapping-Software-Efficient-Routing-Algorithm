@@ -7,7 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../models/delivery_address.dart';
 import '../models/place_suggestion.dart';
 import '../providers/delivery_provider.dart';
-import '../services/google_api_service.dart' as api;
+import '../services/geocoding_service.dart';
 
 class AddressesScreen extends StatefulWidget {
   const AddressesScreen({super.key});
@@ -17,7 +17,6 @@ class AddressesScreen extends StatefulWidget {
 
 class _AddressesScreenState extends State<AddressesScreen> {
   final _searchCtrl = TextEditingController();
-  final _api = api.GoogleApiService();
   final _sessionToken = const Uuid().v4();
 
   Timer? _debounce;
@@ -40,7 +39,8 @@ class _AddressesScreenState extends State<AddressesScreen> {
         return;
       }
       try {
-        final r = await _api.placeAutocomplete(q, sessionToken: _sessionToken);
+        // Use the new static method from GeocodingService
+        final r = await GeocodingService.placeAutocomplete(q, sessionToken: _sessionToken);
         if (mounted) setState(() => _suggestions = r);
       } catch (e) {
         // If Places is restricted or fails, just hide suggestions
@@ -52,7 +52,8 @@ class _AddressesScreenState extends State<AddressesScreen> {
   Future<void> _addFromSuggestion(PlaceSuggestion s) async {
     setState(() => _adding = true);
     try {
-      final detail = await _api.placeDetails(s.placeId, sessionToken: _sessionToken);
+      // Use the new static method from GeocodingService
+      final detail = await GeocodingService.placeDetails(s.placeId, sessionToken: _sessionToken);
 
       // Parse address parts from components
       final c = detail.components;
@@ -68,8 +69,9 @@ class _AddressesScreenState extends State<AddressesScreen> {
         city: city,
         state: state,
         zipCode: zip,
-        latitude: detail.latLng.lat,
-        longitude: detail.latLng.lng,
+        // Adapt to the new ParsedPlace structure
+        latitude: detail.latitude,
+        longitude: detail.longitude,
       );
 
       await context.read<DeliveryProvider>().addAddress(addr);
@@ -95,19 +97,11 @@ class _AddressesScreenState extends State<AddressesScreen> {
 
     setState(() => _adding = true);
     try {
-      // Try to geocode the free-typed string (works even if Places is blocked)
-      final loc = await _api.geocodeAddress(free);
+      // Create a temporary address and geocode it with the new service
+      final tempAddr = DeliveryAddress(streetAddress: free, city: '', state: '', zipCode: '');
+      final geocodedAddr = await GeocodingService.geocodeAddress(tempAddr);
 
-      final addr = DeliveryAddress(
-        streetAddress: free, // keep whole string here
-        city: '',
-        state: '',
-        zipCode: '',
-        latitude: loc?.lat,
-        longitude: loc?.lng,
-      );
-
-      await context.read<DeliveryProvider>().addAddress(addr);
+      await context.read<DeliveryProvider>().addAddress(geocodedAddr);
       if (!mounted) return;
       _searchCtrl.clear();
       setState(() => _suggestions = []);

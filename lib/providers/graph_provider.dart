@@ -1,15 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-// 👇 Do NOT import google_maps_flutter here (it has a conflicting LatLng).
-// import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../models/delivery_address.dart';
 import '../models/digraph.dart';
-// 👇 Alias the service so we can refer to api.LatLng and api.GoogleApiService
-import '../services/google_api_service.dart' as api;
+import '../services/geocoding_service.dart';
 import 'dart:math' as math;
 import 'package:google_maps_flutter/google_maps_flutter.dart' as gmap;
 import '../models/path_result.dart';
+
+// Private LatLng class to avoid conflicts and dependency on other services
+class _LatLng {
+  final double lat;
+  final double lng;
+  _LatLng(this.lat, this.lng);
+}
 
 class GraphNode {
   final String id;
@@ -94,78 +98,28 @@ class GraphProvider extends ChangeNotifier {
   }
 
   // ===== Routing Graph Fields =====
-  final api.GoogleApiService apiService;
-  GraphProvider({api.GoogleApiService? apiService})
-      : apiService = apiService ?? api.GoogleApiService();
-
   List<DeliveryAddress> addresses = [];
   Digraph? graph;
   List<List<int>>? matrix;
 
-  /// Build the routing graph from delivery addresses (real Google APIs).
-  // at the top of the file you should already have:
-// import '../services/google_api_service.dart' as api;
-
+  /// Build the routing graph from delivery addresses.
   Future<void> buildGraphFromAddresses(List<DeliveryAddress> input) async {
-    addresses = input;
-
     try {
       debugPrint('buildGraph: start input=${input.length}');
 
-      // 1) Geocode
-      final fullAddresses = addresses.map((a) => a.fullAddress).toList();
-      debugPrint('buildGraph: fullAddresses -> $fullAddresses');
-
-      final geocodeMap = await apiService
-          .geocodeAddresses(fullAddresses)
-          .timeout(const Duration(seconds: 12));
-      debugPrint('buildGraph: geocode ok -> ${geocodeMap.length} hits');
-      debugPrint('buildGraph: geocode keys -> ${geocodeMap.keys.toList()}');
-
-      // Fallback coordinates for the demo addresses we’re using,
-      // in case the service returns null values.
-      final Map<String, api.LatLng> demoFallbacks = {
-        '1600 Amphitheatre Pkwy, Mountain View, CA 94043': api.LatLng(37.4220, -122.0841),
-        '1 Infinite Loop, Cupertino, CA 95014': api.LatLng(37.33182, -122.03118),
-        '1355 Market St, San Francisco, CA 94103': api.LatLng(37.7763, -122.4176),
-        '1 Hacker Way, Menlo Park, CA 94025': api.LatLng(37.4847, -122.1477),
-      };
-
-      // Map results back to addresses:
-      final geoValues = geocodeMap.values.toList(); // keep insertion order
-      for (int i = 0; i < addresses.length; i++) {
-        final key = fullAddresses[i];
-
-        // 1) try exact key
-        api.LatLng? loc = geocodeMap[key];
-
-        // 2) fall back by index (if the service inserted in the same order)
-        loc ??= (i < geoValues.length ? geoValues[i] : null);
-
-        // 3) fall back to known demo coords
-        loc ??= demoFallbacks[key];
-
-        if (loc != null) {
-          addresses[i].latitude = loc.lat;
-          addresses[i].longitude = loc.lng;
-        } else {
-          addresses[i].latitude = null;
-          addresses[i].longitude = null;
-        }
-        debugPrint('buildGraph: set $key -> ${addresses[i].latitude}, ${addresses[i].longitude}');
-      }
+      // 1) Geocode addresses using the new GeocodingService
+      addresses = await GeocodingService.geocodeAddresses(input)
+          .timeout(const Duration(seconds: 15));
 
       // 2) Build origins from addresses that now have coords
       final valid = addresses.where((a) => a.hasCoordinates).toList();
       debugPrint('buildGraph: valid coords -> ${valid.length}');
-      final List<api.LatLng> origins =
-      valid.map((a) => api.LatLng(a.latitude!, a.longitude!)).toList();
+      
       // Persist mappings for T9 adapters
-      _nodeCoords = origins;
+      _nodeCoords = valid.map((a) => _LatLng(a.latitude!, a.longitude!)).toList();
       _nodeToAddressIndex = valid.map((a) => addresses.indexOf(a)).toList();
 
-
-      if (origins.length < 2) {
+      if (valid.length < 2) {
         debugPrint('buildGraph: not enough valid origins, bailing');
         graph = null;
         matrix = null;
@@ -173,16 +127,40 @@ class GraphProvider extends ChangeNotifier {
         return;
       }
 
-      // 3) Distance matrix
-      matrix = await apiService
-          .getDistanceMatrix(origins)
-          .timeout(const Duration(seconds: 12));
+      // 3) Get distance matrix from the new service
+      final distanceMap = await GeocodingService.getDistanceMatrix(valid);
+      
+      // 4) Convert the distance map (km) to a time matrix (seconds)
+      final n = valid.length;
+      matrix = List.generate(n, (_) => List.filled(n, 1 << 30));
+      final idToIndex = {for (var i = 0; i < n; i++) valid[i].id: i};
+
+      for (final fromEntry in distanceMap.entries) {
+        final fromId = fromEntry.key;
+        final i = idToIndex[fromId];
+        if (i == null) continue;
+
+        for (final toEntry in fromEntry.value.entries) {
+          final toId = toEntry.key;
+          final j = idToIndex[toId];
+          if (j == null) continue;
+
+          final distanceKm = toEntry.value;
+          if (distanceKm.isFinite) {
+            // Convert distance (km) to time (seconds). Assume 50 km/h average speed.
+            // time_seconds = (distance_km / 50 km/h) * 3600 s/h = distance_km * 72
+            matrix![i][j] = (distanceKm * 72).toInt();
+          } else {
+            matrix![i][j] = 1 << 30; // Use a large number for infinity
+          }
+        }
+      }
       debugPrint('buildGraph: matrix ${matrix!.length}x${matrix![0].length}');
 
-      // 4) Build digraph
-      graph = Digraph(origins.length);
-      for (int i = 0; i < origins.length; i++) {
-        for (int j = 0; j < origins.length; j++) {
+      // 5) Build digraph
+      graph = Digraph(n);
+      for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
           if (i == j) continue;
           final w = matrix![i][j];
           if (w < (1 << 29)) graph!.addEdge(i, j, w);
@@ -190,7 +168,7 @@ class GraphProvider extends ChangeNotifier {
       }
       debugPrint('buildGraph: digraph nodes=${graph!.n}');
     } on TimeoutException {
-      debugPrint('buildGraph: timeout from Google APIs');
+      debugPrint('buildGraph: timeout from Geocoding APIs');
       graph = null;
       matrix = null;
       rethrow;
@@ -203,8 +181,6 @@ class GraphProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
-
-
 
   /// Compute shortest route between two nodes in the routing graph
   Map<String, dynamic> shortestRoute(int startIndex, int endIndex) {
@@ -220,7 +196,7 @@ class GraphProvider extends ChangeNotifier {
 }
 
 // Persisted mapping for T9 once buildGraphFromAddresses() runs
-List<api.LatLng> _nodeCoords = [];     // nodeId -> api.LatLng
+List<_LatLng> _nodeCoords = [];     // nodeId -> _LatLng
 List<int> _nodeToAddressIndex = [];    // nodeId -> index in `addresses`
 
 extension T9GraphAdapter on GraphProvider {
@@ -231,7 +207,6 @@ extension T9GraphAdapter on GraphProvider {
     }
     final p = _nodeCoords[nodeId];
     return gmap.LatLng(p.lat, p.lng);
-    // NOTE: api.LatLng has fields (lat, lng)
   }
 
   /// Return the nodeId whose coordinate is closest (great-circle) to [p].
@@ -294,4 +269,3 @@ extension T9GraphAdapter on GraphProvider {
 
   double _deg2rad(double d) => d * (math.pi / 180.0);
 }
-

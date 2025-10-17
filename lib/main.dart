@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -18,15 +20,25 @@ import 'providers/route_provider.dart';
 
 import 'login.dart';
 import 'signup.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  await dotenv.load(fileName: ".env");
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  runApp(const GraphGoApp());
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    runApp(const GraphGoApp());
+  } catch (e, stackTrace) {
+    log('Error during app initialization: $e');
+    log('Stack trace for the error: $stackTrace');
+    runApp(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Text('Error initializing app. Check the logs for details: $e'),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class GraphGoApp extends StatelessWidget {

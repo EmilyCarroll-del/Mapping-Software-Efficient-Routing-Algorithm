@@ -1,8 +1,9 @@
 // lib/services/google_api_service.dart
 import 'dart:convert';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:graph_go/firebase_options.dart';
 import '../models/place_suggestion.dart';
 
 class LatLng {
@@ -19,13 +20,11 @@ class ParsedPlace {
 }
 
 class GoogleApiService {
-  final String key = dotenv.env['WEB_GOOGLE_API_KEY']
-      ?? dotenv.env['GOOGLE_MAPS_API_KEY']
-      ?? '';
+  final String key = DefaultFirebaseOptions.currentPlatform.apiKey;
 
   void _ensureKey() {
     if (key.isEmpty) {
-      throw Exception('GOOGLE_MAPS_API_KEY (or WEB_GOOGLE_API_KEY) is missing from .env');
+      throw Exception('API key is missing from firebase_options.dart');
     }
   }
 
@@ -38,14 +37,29 @@ class GoogleApiService {
       '/maps/api/geocode/json',
       {'address': address, 'key': key},
     );
-    final res = await http.get(uri);
-    if (res.statusCode != 200) return null;
+    
+    debugPrint('Geocoding Request URI: $uri');
 
-    final data = json.decode(res.body);
-    if (data['status'] != 'OK' || (data['results'] as List).isEmpty) return null;
+    try {
+      final res = await http.get(uri);
 
-    final loc = data['results'][0]['geometry']['location'];
-    return LatLng((loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble());
+      debugPrint('Geocoding Response Code: ${res.statusCode}');
+      debugPrint('Geocoding Response Body: ${res.body}');
+
+      if (res.statusCode != 200) return null;
+
+      final data = json.decode(res.body);
+      if (data['status'] != 'OK' || (data['results'] as List).isEmpty) {
+        debugPrint('Geocoding error: ${data['status']}, ${data['error_message']}');
+        return null;
+      }
+
+      final loc = data['results'][0]['geometry']['location'];
+      return LatLng((loc['lat'] as num).toDouble(), (loc['lng'] as num).toDouble());
+    } catch (e) {
+      debugPrint('Error in geocodeAddress: $e');
+      return null;
+    }
   }
 
   /// Geocode many addresses sequentially (friendlier to rate limits).
@@ -77,31 +91,44 @@ class GoogleApiService {
         'key': key,
       },
     );
+    
+    debugPrint('DistanceMatrix Request URI: $uri');
 
-    final res = await http.get(uri);
-    if (res.statusCode != 200) {
-      throw Exception('DistanceMatrix failed: ${res.statusCode}');
-    }
-    final data = json.decode(res.body);
-    if (data['status'] != 'OK') {
-      throw Exception('DistanceMatrix response: ${data['status']}');
-    }
+    try {
+      final res = await http.get(uri);
+      
+      debugPrint('DistanceMatrix Response Code: ${res.statusCode}');
+      debugPrint('DistanceMatrix Response Body: ${res.body}');
 
-    final rows = data['rows'] as List;
-    final n = rows.length;
-    final List<List<int>> matrix = List.generate(n, (_) => List.filled(n, 1 << 30));
-    for (int i = 0; i < n; i++) {
-      final elements = rows[i]['elements'] as List;
-      for (int j = 0; j < elements.length; j++) {
-        final el = elements[j];
-        if (el['status'] == 'OK' && el['duration'] != null) {
-          matrix[i][j] = (el['duration']['value'] as num).toInt(); // seconds
-        } else {
-          matrix[i][j] = 1 << 30; // unreachable sentinel
+      if (res.statusCode != 200) {
+        throw Exception('DistanceMatrix failed: ${res.statusCode}');
+      }
+      final data = json.decode(res.body);
+      if (data['status'] != 'OK') {
+        final errorMessage = data['error_message'] ?? 'No error message provided.';
+        throw Exception('DistanceMatrix response: ${data['status']} - $errorMessage');
+      }
+
+      final rows = data['rows'] as List;
+      final n = rows.length;
+      final List<List<int>> matrix = List.generate(n, (_) => List.filled(n, 1 << 30));
+      for (int i = 0; i < n; i++) {
+        final elements = rows[i]['elements'] as List;
+        for (int j = 0; j < elements.length; j++) {
+          final el = elements[j];
+          if (el['status'] == 'OK' && el['duration'] != null) {
+            matrix[i][j] = (el['duration']['value'] as num).toInt(); // seconds
+          } else {
+            matrix[i][j] = 1 << 30; // unreachable sentinel
+             debugPrint('Warning: Unreachable route between origin $i and destination $j. Status: ${el['status']}');
+          }
         }
       }
+      return matrix;
+    } catch (e) {
+      debugPrint('Error in getDistanceMatrix: $e');
+      rethrow;
     }
-    return matrix;
   }
 
   // ---------------- Places Autocomplete ----------------
@@ -132,7 +159,6 @@ class GoogleApiService {
 
     final status = data['status'] as String? ?? 'UNKNOWN_ERROR';
     if (status != 'OK' && status != 'ZERO_RESULTS') {
-      print('Places Autocomplete error: $status  ${data['error_message'] ?? ''}');
       throw Exception('Places Autocomplete error: $status');
     }
 
