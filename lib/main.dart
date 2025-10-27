@@ -8,12 +8,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'firebase_options.dart';
 
+import 'models/delivery_address.dart';
 import 'screens/home_screen.dart';
 import 'screens/graph_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/addresses_screen.dart';
+import 'screens/optimized_route_map_screen.dart';
 
+import 'screens/driver_assigned_orders_screen.dart';
 import 'providers/delivery_provider.dart';
 import 'providers/graph_provider.dart';
 import 'providers/route_provider.dart';
@@ -108,6 +111,19 @@ final GoRouter _router = GoRouter(
         GoRoute(
           path: 'route-map',
           builder: (BuildContext context, GoRouterState state) => const GraphScreen(),
+        ),
+        GoRoute(
+          path: 'assigned-orders',
+          builder: (BuildContext context, GoRouterState state) {
+            return const DriverAssignedOrdersScreen();
+          },
+        ),
+        GoRoute(
+          path: 'optimized-route-map',
+          builder: (BuildContext context, GoRouterState state) {
+            final selectedOrders = state.extra as List<DeliveryAddress>? ?? [];
+            return OptimizedRouteMapScreen(selectedOrders: selectedOrders);
+          },
         ),
       ],
     ),

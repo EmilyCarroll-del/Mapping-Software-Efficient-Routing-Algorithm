@@ -5,6 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:location/location.dart';
 import '../providers/delivery_provider.dart';
+import '../services/firestore_service.dart';
 import '../colors.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,105 +21,176 @@ class _HomeScreenState extends State<HomeScreen> {
   LocationData? _currentLocation;
   bool _isLocationLoading = true;
   bool _locationPermissionGranted = false;
-  static const LatLng _defaultLocation = LatLng(40.7128, -74.0060); // New York City
+  static const LatLng _defaultLocation = LatLng(40.7143, -73.5994); // Hofstra University, Hempstead, NY
   Set<Marker> _markers = {};
+  
+  // Real order statistics
+  final FirestoreService _firestoreService = FirestoreService();
+  int _totalOrders = 0;
+  int _completedOrders = 0;
+  int _inProgressOrders = 0;
 
   @override
   void initState() {
     super.initState();
     _initializeLocation();
+    _loadOrderStatistics();
+    
     // Listen to authentication state changes
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
       if (mounted) {
         setState(() {});
+        if (user != null) {
+          _loadOrderStatistics();
+        }
+      }
+    });
+  }
+
+  void _loadOrderStatistics() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Listen to total orders
+    _firestoreService.getDriverAddressCount(user.uid).listen((count) {
+      if (mounted) {
+        setState(() {
+          _totalOrders = count;
+        });
+      }
+    });
+
+    // Listen to completed orders
+    _firestoreService.getDriverCompletedCount(user.uid).listen((count) {
+      if (mounted) {
+        setState(() {
+          _completedOrders = count;
+        });
+      }
+    });
+
+    // Listen to in-progress orders
+    _firestoreService.getDriverInProgressCount(user.uid).listen((count) {
+      if (mounted) {
+        setState(() {
+          _inProgressOrders = count;
+        });
       }
     });
   }
 
   Future<void> _initializeLocation() async {
     try {
-      // Check if location service is enabled
-      bool serviceEnabled = await _location.serviceEnabled();
-      if (!serviceEnabled) {
-        serviceEnabled = await _location.requestService();
-        if (!serviceEnabled) {
-          setState(() {
-            _isLocationLoading = false;
-          });
-          return;
-        }
-      }
-
-      // Check location permission
-      PermissionStatus permissionGranted = await _location.hasPermission();
-      if (permissionGranted == PermissionStatus.denied) {
-        permissionGranted = await _location.requestPermission();
-        if (permissionGranted != PermissionStatus.granted) {
-          setState(() {
-            _isLocationLoading = false;
-          });
-          return;
-        }
-      }
-
+      print('🗺️ Initializing location...');
+      
+      // For now, let's force use Hofstra University location
+      // This ensures the app always shows the correct location
+      print('📍 Using Hofstra University as default location');
+      _currentLocation = LocationData.fromMap({
+        'latitude': _defaultLocation.latitude,
+        'longitude': _defaultLocation.longitude,
+        'accuracy': 100.0,
+        'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
+      });
+      
+      print('✅ Location set to Hofstra: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
       setState(() {
+        _isLocationLoading = false;
         _locationPermissionGranted = true;
       });
-
-      // Get current location
-      _currentLocation = await _location.getLocation();
-      if (_currentLocation != null) {
-        setState(() {
-          _isLocationLoading = false;
-        });
-        
-        // Move camera to current location
-        if (_mapController != null) {
-          _mapController!.animateCamera(
-            CameraUpdate.newLatLng(
-              LatLng(_currentLocation!.latitude!, _currentLocation!.longitude!),
-            ),
-          );
-        }
+      
+      // Move camera to Hofstra location
+      if (_mapController != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLng(_defaultLocation),
+        );
       }
 
-      // Listen to location changes
+      // Check if location service is enabled for future updates
+      bool serviceEnabled = await _location.serviceEnabled();
+      print('📍 Location service enabled: $serviceEnabled');
+      
+      if (!serviceEnabled) {
+        serviceEnabled = await _location.requestService();
+        print('📍 Location service requested: $serviceEnabled');
+      }
+
+      // Check location permission for future updates
+      PermissionStatus permissionGranted = await _location.hasPermission();
+      print('🔐 Location permission status: $permissionGranted');
+      
+      if (permissionGranted == PermissionStatus.denied) {
+        permissionGranted = await _location.requestPermission();
+        print('🔐 Location permission requested: $permissionGranted');
+      }
+
+      // Listen to location changes (but keep Hofstra as fallback)
       _location.onLocationChanged.listen((LocationData locationData) {
         if (mounted) {
-          setState(() {
-            _currentLocation = locationData;
-          });
+          print('🔄 Location updated: ${locationData.latitude}, ${locationData.longitude}');
           
-          // Update camera position if needed
-          if (_mapController != null) {
-            _mapController!.animateCamera(
-              CameraUpdate.newLatLng(
-                LatLng(locationData.latitude!, locationData.longitude!),
-              ),
-            );
+          // Only update if we get a reasonable location (not Google HQ)
+          // Check if the location is within reasonable bounds for Hofstra area
+          if (locationData.latitude! > 40.0 && locationData.latitude! < 41.0 && 
+              locationData.longitude! > -74.0 && locationData.longitude! < -73.0) {
+            setState(() {
+              _currentLocation = locationData;
+            });
+            
+            // Update camera position
+            if (_mapController != null) {
+              _mapController!.animateCamera(
+                CameraUpdate.newLatLng(
+                  LatLng(locationData.latitude!, locationData.longitude!),
+                ),
+              );
+            }
+          } else {
+            print('📍 Ignoring location update (outside Hofstra area)');
           }
         }
       });
     } catch (e) {
-      print('Error getting location: $e');
+      print('❌ Error getting location: $e');
+      print('📍 Using default location: ${_defaultLocation.latitude}, ${_defaultLocation.longitude}');
+      
+      // Fallback to Hofstra location
+      _currentLocation = LocationData.fromMap({
+        'latitude': _defaultLocation.latitude,
+        'longitude': _defaultLocation.longitude,
+        'accuracy': 100.0,
+        'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
+      });
+      
       setState(() {
         _isLocationLoading = false;
+        _locationPermissionGranted = true;
       });
     }
   }
 
   Future<void> _getCurrentLocation() async {
     try {
-      _currentLocation = await _location.getLocation();
-      if (_currentLocation != null && _mapController != null) {
+      print('📍 Manual location request...');
+      
+      // Force use Hofstra University location
+      _currentLocation = LocationData.fromMap({
+        'latitude': _defaultLocation.latitude,
+        'longitude': _defaultLocation.longitude,
+        'accuracy': 100.0,
+        'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
+      });
+      
+      print('✅ Manual location set to Hofstra: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
+      
+      if (_mapController != null) {
         _mapController!.animateCamera(
-          CameraUpdate.newLatLng(
-            LatLng(_currentLocation!.latitude!, _currentLocation!.longitude!),
-          ),
+          CameraUpdate.newLatLng(_defaultLocation),
         );
       }
+      setState(() {}); // Refresh UI
     } catch (e) {
-      print('Error getting current location: $e');
+      print('❌ Error setting location to Hofstra: $e');
     }
   }
 
@@ -330,9 +402,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                 children: [
                                   _buildQuickStat(
-                                    'Addresses',
-                                    '${deliveryProvider.addressCount}',
-                                    Icons.location_on,
+                                    'Total Orders',
+                                    '$_totalOrders',
+                                    Icons.assignment,
                                     kPrimaryColor,
                                   ),
                                   Container(
@@ -341,10 +413,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                     color: Colors.grey.withOpacity(0.3),
                                   ),
                                   _buildQuickStat(
-                                    'Routes',
-                                    '0',
-                                    Icons.route,
-                                    kAccentColor,
+                                    'In Progress',
+                                    '$_inProgressOrders',
+                                    Icons.hourglass_empty,
+                                    Colors.orange,
                                   ),
                                   Container(
                                     width: 1,
@@ -352,10 +424,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                     color: Colors.grey.withOpacity(0.3),
                                   ),
                                   _buildQuickStat(
-                                    'Distance',
-                                    '0 km',
-                                    Icons.straighten,
-                                    Colors.orange,
+                                    'Completed',
+                                    '$_completedOrders',
+                                    Icons.check_circle,
+                                    Colors.green,
                                   ),
                                 ],
                               ),
@@ -367,24 +439,54 @@ class _HomeScreenState extends State<HomeScreen> {
                             Row(
                               children: [
                                 Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: () => context.go('/addresses'),
-                                    icon: const Icon(Icons.add_location),
-                                    label: const Text('Add Address'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: kPrimaryColor,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
+                                  child: Stack(
+                                    children: [
+                                      ElevatedButton.icon(
+                                        onPressed: () => context.go('/assigned-orders'),
+                                        icon: const Icon(Icons.assignment),
+                                        label: const Text('Assigned Orders'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: kPrimaryColor,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                        ),
                                       ),
-                                    ),
+                                      // Notification badge for ongoing orders
+                                      if (_inProgressOrders > 0)
+                                        Positioned(
+                                          right: 8,
+                                          top: 8,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.red,
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            constraints: const BoxConstraints(
+                                              minWidth: 20,
+                                              minHeight: 20,
+                                            ),
+                                            child: Text(
+                                              '$_inProgressOrders',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: deliveryProvider.addressCount >= 2 
+                                    onPressed: _totalOrders >= 2 
                                         ? () => context.go('/optimize')
                                         : null,
                                     icon: const Icon(Icons.route),

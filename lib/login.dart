@@ -24,24 +24,35 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
+      print('Starting email login...');
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+
+      final user = FirebaseAuth.instance.currentUser;
+      print('Email login successful: ${user?.email}');
 
       // Update last sign-in time
       await GoogleAuthService.updateLastSignIn();
 
       // Navigate to home and refresh the state
       if (mounted) {
+        print('Redirecting to home page...');
         context.go('/');
+        print('Redirect command sent');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: ${e.toString()}")),
-      );
+      print('Email login failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Login Failed: ${e.toString()}")),
+        );
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
