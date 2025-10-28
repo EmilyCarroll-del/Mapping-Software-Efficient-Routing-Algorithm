@@ -23,6 +23,8 @@ import 'screens/admin_dashboard_screen.dart';
 import 'screens/assigned_addresses_screen.dart';
 import 'screens/driver_assignments_screen.dart';
 
+const String googleApiKey = "AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74";
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -68,7 +70,6 @@ class MyApp extends StatelessWidget {
               colorScheme: ColorScheme.dark(
                 primary: Colors.deepPurple.shade300,
                 surface: Colors.grey.shade800,
-                background: Colors.black,
               ),
               scaffoldBackgroundColor: Colors.black,
               appBarTheme: const AppBarTheme(
