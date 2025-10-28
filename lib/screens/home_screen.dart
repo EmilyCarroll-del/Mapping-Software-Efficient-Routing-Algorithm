@@ -29,7 +29,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _totalOrders = 0;
   int _completedOrders = 0;
   int _inProgressOrders = 0;
-  int _activeOrders = 0;
 
   @override
   void initState() {
@@ -75,14 +74,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _inProgressOrders = count;
-        });
-      }
-    });
-
-    _firestoreService.getDriverActiveCount(user.uid).listen((count) {
-      if (mounted) {
-        setState(() {
-          _activeOrders = count;
         });
       }
     });
@@ -495,11 +486,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: _activeOrders > 0
+                                    onPressed: _inProgressOrders > 0
                                         ? () async {
                                             if (user != null) {
-                                              final activeOrders = await _firestoreService.getDriverActiveOrders(user.uid);
-                                              context.go('/optimized-route-map', extra: activeOrders);
+                                              final inProgressOrders = await _firestoreService.getDriverInProgressOrders(user.uid);
+                                              context.go('/optimized-route-map', extra: inProgressOrders);
                                             }
                                           }
                                         : null,

@@ -82,18 +82,22 @@ class _DriverAssignedOrdersScreenState
             );
           }
 
-          final orders = snapshot.data!.docs;
+          final allActiveOrders = snapshot.data!.docs;
+          final inProgressOrders = allActiveOrders.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['status'] == 'in_progress';
+          }).toList();
 
           return Column(
             children: [
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.all(16),
-                  itemCount: orders.length,
+                  itemCount: allActiveOrders.length,
                   itemBuilder: (context, index) {
                     final orderData =
-                        orders[index].data() as Map<String, dynamic>;
-                    final orderId = orders[index].id;
+                        allActiveOrders[index].data() as Map<String, dynamic>;
+                    final orderId = allActiveOrders[index].id;
                     final deliveryAddress = DeliveryAddress.fromJson(orderData
                       ..['id'] = orderId); // Ensure ID is populated for the model
 
@@ -194,14 +198,14 @@ class _DriverAssignedOrdersScreenState
                   },
                 ),
               ),
-              if (orders.isNotEmpty)
+              if (inProgressOrders.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
-                        final ordersToOptimize = orders.map((doc) {
+                        final ordersToOptimize = inProgressOrders.map((doc) {
                           final data = doc.data() as Map<String, dynamic>;
                           data['id'] = doc.id;
                           return DeliveryAddress.fromJson(data);
