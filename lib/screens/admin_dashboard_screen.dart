@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'inbox.dart'; // Import the InboxPage
 import '../models/delivery_address.dart';
 import '../services/firestore_service.dart';
 import '../widgets/address_list.dart';
@@ -188,6 +189,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         title: const Text('GraphGo Admin', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.inbox, color: Colors.white),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const InboxPage()),
+              );
+            },
+            tooltip: 'Inbox',
+          ),
           if (_user != null)
             Padding(
               padding: const EdgeInsets.only(right: 8.0),
