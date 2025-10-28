@@ -5,13 +5,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../models/delivery_address.dart';
-import '../models/user_model.dart';
 import '../services/firestore_service.dart';
 import '../widgets/address_list.dart';
 import '../widgets/add_edit_address_dialog.dart';
 import '../widgets/assign_drivers_dialog.dart';
 import '../widgets/drivers_list.dart';
-import '../widgets/users_list.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -152,10 +150,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     await FirebaseAuth.instance.signOut();
   }
 
-  void _assignDriverRole(String uid) {
-    _firestoreService.assignDriverRole(uid);
-  }
-
   void _removeDriverRole(String uid) {
     _firestoreService.removeDriverRole(uid);
   }
@@ -289,15 +283,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Users', style: Theme.of(context).textTheme.headlineSmall),
-                Expanded(
-                  child: UsersList(
-                    usersStream: _firestoreService.getUsers(),
-                    onAssignDriver: _assignDriverRole,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('Drivers', style: Theme.of(context).textTheme.headlineSmall),
+                Text('Active Drivers', style: Theme.of(context).textTheme.headlineSmall),
                 Expanded(
                   child: DriversList(
                     driversStream: _firestoreService.getDrivers(),
