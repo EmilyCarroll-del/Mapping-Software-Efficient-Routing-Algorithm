@@ -17,6 +17,7 @@ class _DriverAssignedOrdersScreenState
     extends State<DriverAssignedOrdersScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   User? _currentUser;
+  bool _isSelectingAll = false;
 
   @override
   void initState() {
@@ -45,6 +46,32 @@ class _DriverAssignedOrdersScreenState
         title: const Text('Assigned Orders'),
         backgroundColor: const Color(0xFF0D2B0D),
         foregroundColor: Colors.white,
+        actions: [
+          StreamBuilder<QuerySnapshot>(
+            stream: _getAssignedOrdersStream(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return TextButton.icon(
+                onPressed: _isSelectingAll
+                    ? null
+                    : () => _selectAllOrders(snapshot.data!.docs),
+                icon: _isSelectingAll
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.done_all, color: Colors.white),
+                label: const Text('Select All', style: TextStyle(color: Colors.white)),
+              );
+            },
+          ),
+        ],
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _firestore
@@ -230,6 +257,67 @@ class _DriverAssignedOrdersScreenState
         },
       ),
     );
+  }
+
+  Stream<QuerySnapshot> _getAssignedOrdersStream() {
+    return _firestore
+        .collection('addresses')
+        .where('driverId', isEqualTo: _currentUser!.uid)
+        .where('status', isEqualTo: 'assigned')
+        .snapshots();
+  }
+
+  Future<void> _selectAllOrders(List<QueryDocumentSnapshot> docs) async {
+    setState(() {
+      _isSelectingAll = true;
+    });
+
+    try {
+      final batch = _firestore.batch();
+
+      for (final doc in docs) {
+        final orderData = doc.data() as Map<String, dynamic>;
+        final deliveryAddress = DeliveryAddress.fromJson(orderData..['id'] = doc.id);
+
+        DeliveryAddress updatedAddress = deliveryAddress;
+        if (!deliveryAddress.hasCoordinates) {
+          updatedAddress = await GeocodingService.geocodeAddress(deliveryAddress);
+        }
+
+        batch.update(doc.reference, {
+          'status': 'in_progress',
+          'latitude': updatedAddress.latitude,
+          'longitude': updatedAddress.longitude,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${docs.length} orders have been started.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error starting orders: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSelectingAll = false;
+        });
+      }
+    }
   }
 
   Color _getStatusColor(String status) {
