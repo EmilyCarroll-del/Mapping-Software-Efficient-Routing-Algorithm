@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:location/location.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geocoding/geocoding.dart' as geocoding;
 
+import 'inbox.dart'; // Import the InboxPage
 import '../models/delivery_address.dart';
 import '../services/firestore_service.dart';
 
@@ -74,7 +74,6 @@ class _MapScreenState extends State<MapScreen> {
     _firestoreService.getDriverDeliveries(userId).listen((addresses) async {
       Set<Marker> newMarkers = {};
       for (var address in addresses) {
-        // Check for null or empty required fields before geocoding
         if (address.streetAddress.isNotEmpty &&
             address.city.isNotEmpty &&
             address.state.isNotEmpty &&
@@ -140,6 +139,16 @@ class _MapScreenState extends State<MapScreen> {
             },
             icon: const Icon(Icons.assignment, color: Colors.white),
             label: const Text('View Assignments', style: TextStyle(color: Colors.white)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.inbox),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const InboxPage()),
+              );
+            },
+            tooltip: 'Inbox',
           ),
           if (user?.email != null)
             Padding(
