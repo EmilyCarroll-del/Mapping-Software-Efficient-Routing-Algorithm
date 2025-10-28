@@ -21,6 +21,7 @@ class _OptimizedRouteMapScreenState extends State<OptimizedRouteMapScreen> {
   final Set<Marker> _markers = HashSet<Marker>();
   final Set<Polyline> _polylines = HashSet<Polyline>();
   List<DeliveryAddress> _optimizedRoute = [];
+  double _totalDistance = 0.0;
 
   @override
   void initState() {
@@ -51,8 +52,23 @@ class _OptimizedRouteMapScreenState extends State<OptimizedRouteMapScreen> {
       widget.selectedOrders.first,
     );
 
+    double totalDistance = 0.0;
+    for (int i = 0; i < optimizedRoute.length - 1; i++) {
+      final start = optimizedRoute[i];
+      final end = optimizedRoute[i + 1];
+      if (start.hasCoordinates && end.hasCoordinates) {
+        totalDistance += RoutingAlgorithms.calculateDistance(
+          start.latitude!,
+          start.longitude!,
+          end.latitude!,
+          end.longitude!,
+        );
+      }
+    }
+
     setState(() {
       _optimizedRoute = optimizedRoute;
+      _totalDistance = totalDistance;
       _createPolylines();
     });
   }
@@ -105,20 +121,34 @@ class _OptimizedRouteMapScreenState extends State<OptimizedRouteMapScreen> {
           ),
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _getOptimizedRoute,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D2B0D),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _getOptimizedRoute,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0D2B0D),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text('Get Optimized Route'),
                   ),
                 ),
-                child: const Text('Get Optimized Route'),
-              ),
+                if (_totalDistance > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 16.0),
+                    child: Text(
+                      'Distance: ${(_totalDistance * 0.621371).toStringAsFixed(2)} miles',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],

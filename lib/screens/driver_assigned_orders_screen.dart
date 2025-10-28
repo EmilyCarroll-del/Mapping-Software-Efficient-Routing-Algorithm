@@ -1,6 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import '../models/delivery_address.dart';
 import '../services/geocoding_service.dart';
@@ -17,7 +17,6 @@ class _DriverAssignedOrdersScreenState
     extends State<DriverAssignedOrdersScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   User? _currentUser;
-  final Set<DeliveryAddress> _acceptedOrders = {};
 
   @override
   void initState() {
@@ -37,8 +36,7 @@ class _DriverAssignedOrdersScreenState
     if (_currentUser == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Assigned Orders')),
-        body:
-            const Center(child: Text('Please log in to view assigned orders.')),
+        body: const Center(child: Text('Please log in to view assigned orders.')),
       );
     }
 
@@ -52,6 +50,7 @@ class _DriverAssignedOrdersScreenState
         stream: _firestore
             .collection('addresses')
             .where('driverId', isEqualTo: _currentUser!.uid)
+            .where('status', whereIn: ['assigned', 'in_progress'])
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -171,7 +170,8 @@ class _DriverAssignedOrdersScreenState
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
-                                onPressed: () => _updateOrderStatus(orderId, orderData['status'], deliveryAddress),
+                                onPressed: () => _updateOrderStatus(
+                                    orderId, orderData['status'], deliveryAddress),
                                 icon: Icon(_getActionIcon(
                                     orderData['status'] ?? 'assigned')),
                                 label: Text(_getActionText(
@@ -194,15 +194,20 @@ class _DriverAssignedOrdersScreenState
                   },
                 ),
               ),
-              if (_acceptedOrders.isNotEmpty)
+              if (orders.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () {
+                        final ordersToOptimize = orders.map((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          data['id'] = doc.id;
+                          return DeliveryAddress.fromJson(data);
+                        }).toList();
                         context.go('/optimized-route-map',
-                            extra: _acceptedOrders.toList());
+                            extra: ordersToOptimize);
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0D2B0D),
@@ -285,28 +290,30 @@ class _DriverAssignedOrdersScreenState
       String orderId, String currentStatus, DeliveryAddress address) async {
     try {
       String newStatus;
+      Map<String, dynamic> updates = {};
+
       switch (currentStatus.toLowerCase()) {
         case 'assigned':
           newStatus = 'in_progress';
-          final geocodedAddress = await GeocodingService.geocodeAddress(address);
-          setState(() {
-            _acceptedOrders.add(geocodedAddress);
-          });
+          DeliveryAddress updatedAddress = address;
+          // Geocode the address when starting delivery if it doesn't have coordinates
+          if (!address.hasCoordinates) {
+            updatedAddress = await GeocodingService.geocodeAddress(address);
+          }
+          updates['latitude'] = updatedAddress.latitude;
+          updates['longitude'] = updatedAddress.longitude;
           break;
         case 'in_progress':
           newStatus = 'completed';
-          setState(() {
-            _acceptedOrders.removeWhere((e) => e.id == address.id);
-          });
           break;
         default:
           return; // Already completed or invalid status
       }
 
-      await _firestore.collection('addresses').doc(orderId).update({
-        'status': newStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      updates['status'] = newStatus;
+      updates['updatedAt'] = FieldValue.serverTimestamp();
+
+      await _firestore.collection('addresses').doc(orderId).update(updates);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

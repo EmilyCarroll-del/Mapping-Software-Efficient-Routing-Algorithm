@@ -91,4 +91,43 @@ class FirestoreService {
         .snapshots()
         .map((snapshot) => snapshot.docs.length);
   }
+
+  Future<List<DeliveryAddress>> getDriverInProgressOrders(String driverId) async {
+    final snapshot = await _db
+        .collection(_addressesCollectionPath)
+        .where('driverId', isEqualTo: driverId)
+        .where('status', isEqualTo: 'in_progress')
+        .get();
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return DeliveryAddress.fromJson({
+        'id': doc.id,
+        ...data,
+      });
+    }).toList();
+  }
+
+  Stream<int> getDriverActiveCount(String driverId) {
+    return _db
+        .collection(_addressesCollectionPath)
+        .where('driverId', isEqualTo: driverId)
+        .where('status', whereIn: ['assigned', 'in_progress'])
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+  }
+
+  Future<List<DeliveryAddress>> getDriverActiveOrders(String driverId) async {
+    final snapshot = await _db
+        .collection(_addressesCollectionPath)
+        .where('driverId', isEqualTo: driverId)
+        .where('status', whereIn: ['assigned', 'in_progress'])
+        .get();
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return DeliveryAddress.fromJson({
+        'id': doc.id,
+        ...data,
+      });
+    }).toList();
+  }
 }

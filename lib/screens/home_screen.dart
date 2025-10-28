@@ -17,18 +17,19 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   GoogleMapController? _mapController;
-  Location _location = Location();
+  final Location _location = Location();
   LocationData? _currentLocation;
   bool _isLocationLoading = true;
   bool _locationPermissionGranted = false;
   static const LatLng _defaultLocation = LatLng(40.7143, -73.5994); // Hofstra University, Hempstead, NY
-  Set<Marker> _markers = {};
+  final Set<Marker> _markers = {};
   
   // Real order statistics
   final FirestoreService _firestoreService = FirestoreService();
   int _totalOrders = 0;
   int _completedOrders = 0;
   int _inProgressOrders = 0;
+  int _activeOrders = 0;
 
   @override
   void initState() {
@@ -74,6 +75,14 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _inProgressOrders = count;
+        });
+      }
+    });
+
+    _firestoreService.getDriverActiveCount(user.uid).listen((count) {
+      if (mounted) {
+        setState(() {
+          _activeOrders = count;
         });
       }
     });
@@ -486,8 +495,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: _totalOrders >= 2 
-                                        ? () => context.go('/optimize')
+                                    onPressed: _activeOrders > 0
+                                        ? () async {
+                                            if (user != null) {
+                                              final activeOrders = await _firestoreService.getDriverActiveOrders(user.uid);
+                                              context.go('/optimized-route-map', extra: activeOrders);
+                                            }
+                                          }
                                         : null,
                                     icon: const Icon(Icons.route),
                                     label: const Text('Optimize'),
