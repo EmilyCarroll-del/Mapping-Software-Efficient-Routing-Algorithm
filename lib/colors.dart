@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 // Primary color for GraphGo branding
-const Color kPrimaryColor = Color(0xFF6B46C1); // Deep purple
+const Color kPrimaryColor = Color(0xFF0D2B0D); // Dark green (matches Assigned Orders header)
 
 // Background colors for light and dark themes
 const Color kLightBackground = Color(0xFFFFFFFF); // White

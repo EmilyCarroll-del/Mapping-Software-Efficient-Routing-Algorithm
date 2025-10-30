@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:go_router/go_router.dart';
 import 'chat_page.dart';
 import 'new_chat_screen.dart';
 import '../services/chat_service.dart';
 import '../colors.dart';
 
 class InboxPage extends StatefulWidget {
-  const InboxPage({super.key});
+  final String? openConversationId;
+  const InboxPage({super.key, this.openConversationId});
 
   @override
   State<InboxPage> createState() => _InboxPageState();
@@ -19,11 +21,88 @@ class _InboxPageState extends State<InboxPage> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   List<QueryDocumentSnapshot> _filteredConversations = [];
   bool _isSearching = false;
+  bool _openedFromLink = false;
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // If an external conversation id was provided, open it once when the
+    // widget is built and user is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeOpenConversationFromLink();
+    });
+    // Trigger a lightweight backfill for missing display names on first load
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) return;
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('conversations')
+            .where('participants', arrayContains: currentUser.uid)
+            .get();
+        for (final doc in snap.docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          final participants = List<String>.from(
+            data['participants'] ?? data['users'] ?? []
+          );
+          final displayNames = Map<String, dynamic>.from(data['displayNames'] ?? {});
+          bool missing = false;
+          for (final uid in participants) {
+            if ((displayNames[uid] as String?) == null || (displayNames[uid] as String?)!.isEmpty) {
+              missing = true;
+              break;
+            }
+          }
+          if (missing) {
+            await _chatService.ensureDisplayNames(doc.id, participants);
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _maybeOpenConversationFromLink() async {
+    if (_openedFromLink) return;
+    final convoId = widget.openConversationId;
+    final currentUser = _auth.currentUser;
+    if (convoId == null || currentUser == null) return;
+
+    try {
+      final convDoc = await FirebaseFirestore.instance
+          .collection('conversations')
+          .doc(convoId)
+          .get();
+      if (!convDoc.exists) return;
+
+      final data = convDoc.data() as Map<String, dynamic>;
+      final participants = List<String>.from(data['participants'] ?? []);
+      final otherUserId = participants.firstWhere(
+        (id) => id != currentUser.uid,
+        orElse: () => '',
+      );
+      if (otherUserId.isEmpty) return;
+
+      final userData = await _chatService.getUserDetails(otherUserId);
+      final otherUserName = userData?['name'] ?? userData?['email'] ?? 'User';
+
+      _openedFromLink = true;
+      if (!mounted) return;
+      context.push('/chat', extra: {
+        'conversationId': convoId,
+        'otherUserId': otherUserId,
+        'otherUserName': otherUserName,
+        'orderId': data['orderId'] as String?,
+        'orderTitle': data['orderTitle'] as String?,
+      });
+    } catch (_) {
+      // Silently ignore; user can still tap from list.
+    }
   }
 
   Future<void> _searchConversations(String query) async {
@@ -117,14 +196,29 @@ class _InboxPageState extends State<InboxPage> {
     }
     
     final orderTitle = data['orderTitle'] as String?;
+    final displayNames = (data['displayNames'] as Map<String, dynamic>?) ?? {};
 
     return FutureBuilder<Map<String, dynamic>?>(
       future: _chatService.getUserDetails(otherUserId),
       builder: (context, snapshot) {
         final otherUserData = snapshot.data;
-        final otherUserName = otherUserData?['name'] ?? 
-                             otherUserData?['email'] ?? 
-                             'Unknown User';
+        String otherUserName = (displayNames[otherUserId] as String?) ?? '';
+        if (otherUserName.isEmpty) {
+          otherUserName = otherUserData?['name'] ?? otherUserData?['email'] ?? 'User';
+          // Also trigger background backfill using ChatService for reliability
+          if (otherUserId.isNotEmpty) {
+            _chatService.ensureDisplayNames(conversation.id, participantList);
+          }
+        }
+        // Backfill displayNames into the conversation document if missing
+        if ((displayNames[otherUserId] as String?) == null && otherUserName.isNotEmpty) {
+          try {
+            FirebaseFirestore.instance
+                .collection('conversations')
+                .doc(conversation.id)
+                .update({'displayNames.$otherUserId': otherUserName});
+          } catch (_) {}
+        }
         final otherUserImage = otherUserData?['profileImageUrl'];
 
         return Container(
@@ -139,20 +233,14 @@ class _InboxPageState extends State<InboxPage> {
             onTap: () {
               // Check if this is from old 'chats' collection
               final isOldFormat = data['users'] != null && data['participants'] == null;
-              
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatPage(
-                    conversationId: conversation.id,
-                    otherUserId: otherUserId,
-                    otherUserName: otherUserName,
-                    orderId: data['orderId'] as String?,
-                    orderTitle: orderTitle,
-                    isOldFormat: isOldFormat,
-                  ),
-                ),
-              );
+              context.push('/chat', extra: {
+                'conversationId': conversation.id,
+                'otherUserId': otherUserId,
+                'otherUserName': otherUserName,
+                'orderId': data['orderId'] as String?,
+                'orderTitle': orderTitle,
+                'isOldFormat': isOldFormat,
+              });
             },
             leading: Stack(
               children: [
@@ -229,29 +317,80 @@ class _InboxPageState extends State<InboxPage> {
                 ),
               ],
             ),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  lastMessageTime != null ? _formatTimestamp(lastMessageTime!) : '',
-                  style: TextStyle(
-                    color: unreadCount > 0 ? kPrimaryColor : Colors.grey[500],
-                    fontSize: 12,
-                    fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                if (unreadCount > 0) ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: kPrimaryColor,
-                      shape: BoxShape.circle,
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      lastMessageTime != null ? _formatTimestamp(lastMessageTime!) : '',
+                      style: TextStyle(
+                        color: unreadCount > 0 ? kPrimaryColor : Colors.grey[500],
+                        fontSize: 12,
+                        fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                      ),
                     ),
-                  ),
-                ],
+                    if (unreadCount > 0) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: kPrimaryColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  onSelected: (value) async {
+                    if (value == 'delete') {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete conversation?'),
+                          content: const Text('This will delete all messages in this conversation.'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        try {
+                          await _chatService.deleteConversation(conversation.id);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Conversation deleted')),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Failed to delete: $e')),
+                            );
+                          }
+                        }
+                      }
+                    }
+                  },
+                  itemBuilder: (ctx) => const [
+                    PopupMenuItem<String>(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete, size: 18),
+                          SizedBox(width: 8),
+                          Text('Delete'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),

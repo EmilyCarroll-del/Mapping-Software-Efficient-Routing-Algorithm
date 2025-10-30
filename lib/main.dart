@@ -17,6 +17,7 @@ import 'providers/delivery_provider.dart';
 import 'services/notification_service.dart';
 import 'widgets/bottom_navigation_bar.dart';
 import 'screens/route_history_screen.dart';
+import 'screens/chat_page.dart';
 import 'login.dart';
 import 'signup.dart';
 
@@ -119,6 +120,10 @@ final GoRouter _router = GoRouter(
       return '/';
     }
     
+    // Note: Mobile app is exclusively for drivers. Admin functionality is web-only.
+    // All mobile app signups automatically set userType: 'driver'
+    // All admin users MUST have a companyCode (required during web app signup)
+    
     // No automatic redirect to login - let the home screen handle it
     return null; // No redirect needed
   },
@@ -140,7 +145,10 @@ final GoRouter _router = GoRouter(
         GoRoute(
           path: '/inbox',
           builder: (BuildContext context, GoRouterState state) {
-            return const InboxPage();
+            final openId = state.extra is Map<String, dynamic>
+                ? (state.extra as Map<String, dynamic>)['openConversationId']?.toString()
+                : null;
+            return InboxPage(openConversationId: openId);
           },
         ),
         GoRoute(
@@ -165,6 +173,39 @@ final GoRouter _router = GoRouter(
           path: '/assigned-orders',
           builder: (BuildContext context, GoRouterState state) {
             return const DriverAssignedOrdersScreen();
+          },
+        ),
+        GoRoute(
+          path: '/chat',
+          builder: (BuildContext context, GoRouterState state) {
+            final extras = state.extra is Map<String, dynamic>
+                ? state.extra as Map<String, dynamic>
+                : <String, dynamic>{};
+
+            final conversationId = extras['conversationId']?.toString();
+            final otherUserId = extras['otherUserId']?.toString();
+            final otherUserName = (extras['otherUserName']?.toString()) ?? 'User';
+            final orderId = extras['orderId']?.toString();
+            final orderTitle = extras['orderTitle']?.toString();
+            final isOldFormat = (extras['isOldFormat'] is bool) ? extras['isOldFormat'] as bool : false;
+
+            if (conversationId == null || otherUserId == null) {
+              return Scaffold(
+                appBar: AppBar(title: const Text('Chat')),
+                body: const Center(
+                  child: Text('Invalid chat parameters'),
+                ),
+              );
+            }
+
+            return ChatPage(
+              conversationId: conversationId,
+              otherUserId: otherUserId,
+              otherUserName: otherUserName,
+              orderId: orderId,
+              orderTitle: orderTitle,
+              isOldFormat: isOldFormat,
+            );
           },
         ),
         GoRoute(

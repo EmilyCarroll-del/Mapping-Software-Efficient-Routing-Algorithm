@@ -1,6 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/delivery_address.dart';
 
+/// Service for managing Firestore operations related to deliveries and drivers.
+/// 
+/// Order Assignment Logic (for web app implementation):
+/// - Company drivers (with companyCode): Only receive orders from admins
+///   with the same companyCode
+/// - Freelance drivers (no companyCode): Can receive orders from any admin
+/// - All admins MUST have a companyCode (enforced during web app signup)
+/// 
+/// When assigning orders in the web app, filter available drivers based on:
+/// 1. Admin has companyCode (required) → show only drivers with matching companyCode
+/// 2. Also show freelance drivers (no companyCode) so admins can assign to them too
+/// 3. Filter out drivers who are already assigned/in-progress (as needed)
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final String _deliveriesCollectionPath = 'deliveries';

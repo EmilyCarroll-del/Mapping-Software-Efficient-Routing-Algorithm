@@ -88,25 +88,47 @@ class _NewChatScreenState extends State<NewChatScreen> {
 
           final users = snapshot.data?.docs ?? [];
           
-          // Get current user's company code
+          // Get current user's data
+          final user = currentUser;
+          if (users.isEmpty || user == null) {
+            return const Center(child: Text('No users available'));
+          }
+          
           final currentUserDoc = users.firstWhere(
-            (doc) => doc.id == currentUser?.uid,
+            (doc) => doc.id == user.uid,
             orElse: () => users.first,
           );
           final currentUserData = currentUserDoc.data() as Map<String, dynamic>?;
           final currentCompanyCode = currentUserData?['companyCode'] as String?;
+          final currentUserType = currentUserData?['userType'] as String?;
           
-          // Filter out the current user and filter by company code
+          // Filter users following company code rules:
+          // - Drivers with companyCode can only see admins from same company
+          // - Freelance drivers (no companyCode) can see all admins
+          // - Never show other drivers
+          // Note: All admins MUST have a companyCode (enforced in web app signup)
           final otherUsers = users.where((doc) {
             if (doc.id == currentUser?.uid) return false;
             
-            // If current user has a company code, only show users with the same code
-            if (currentCompanyCode != null && currentCompanyCode.isNotEmpty) {
-              final userData = doc.data() as Map<String, dynamic>?;
-              final userCompanyCode = userData?['companyCode'] as String?;
-              return userCompanyCode == currentCompanyCode;
+            final userData = doc.data() as Map<String, dynamic>?;
+            final userType = userData?['userType'] as String?;
+            final userCompanyCode = userData?['companyCode'] as String?;
+            
+            // If current user is a driver, only show admins
+            if (currentUserType == 'driver') {
+              // Never show other drivers
+              if (userType == 'driver') return false;
+              
+              // If driver has company code, only show admins from same company
+              if (currentCompanyCode != null && currentCompanyCode.isNotEmpty) {
+                return userCompanyCode == currentCompanyCode;
+              }
+              
+              // Freelance drivers can see all admins
+              return userType == 'admin';
             }
             
+            // For admins (shouldn't happen in mobile app, but handle gracefully)
             return true;
           }).toList();
 
@@ -124,8 +146,10 @@ class _NewChatScreenState extends State<NewChatScreen> {
                   const SizedBox(height: 8),
                   Text(
                     currentCompanyCode != null && currentCompanyCode.isNotEmpty
-                        ? 'No users with the same company code'
-                        : 'No other users available',
+                        ? 'No admins from your company available'
+                        : currentUserType == 'driver'
+                            ? 'No admins available'
+                            : 'No other users available',
                     style: TextStyle(color: Colors.grey[600]),
                   ),
                 ],

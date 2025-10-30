@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/delivery_address.dart';
 import '../services/chat_service.dart';
 import 'chat_page.dart';
+import 'package:go_router/go_router.dart';
 
 class DriverAssignedOrdersScreen extends StatefulWidget {
   const DriverAssignedOrdersScreen({super.key});
@@ -312,7 +313,7 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       );
 
       // Get admin ID - try different possible field names
-      String? adminId = orderData['createdBy'] as String? ??
+      String? adminId = (orderData['createdBy'] as String?) ??
                         orderData['adminId'] as String? ??
                         orderData['userId'] as String?;
 
@@ -332,7 +333,9 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       }
 
       if (adminId == null) {
-        Navigator.pop(context); // Close loading
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).maybePop();
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -350,7 +353,9 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       // Get admin user details
       final adminDetails = await _chatService.getUserDetails(adminIdNonNull);
       if (adminDetails == null) {
-        Navigator.pop(context); // Close loading
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).maybePop();
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -363,32 +368,31 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       }
 
       // Create or get conversation
-      final orderTitle = '${orderData['streetAddress'] ?? ''}, ${orderData['city'] ?? ''}, ${orderData['state'] ?? ''} ${orderData['zipCode'] ?? ''}';
+      final orderTitle = '${(orderData['streetAddress'] ?? '').toString().trim()}, ${(orderData['city'] ?? '').toString().trim()}, ${(orderData['state'] ?? '').toString().trim()} ${(orderData['zipCode'] ?? '').toString().trim()}'.trim();
       final conversationId = await _chatService.createOrGetConversation(
-        adminIdNonNull,
-        orderId: orderId,
+        adminIdNonNull.trim(),
+        orderId: orderId.trim(),
         orderTitle: orderTitle,
       );
 
-      Navigator.pop(context); // Close loading
-
-      // Navigate to chat screen
       if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ChatPage(
-              conversationId: conversationId,
-              otherUserId: adminIdNonNull,
-              otherUserName: adminDetails['name'] ?? adminDetails['email'] ?? 'Admin',
-              orderId: orderId,
-              orderTitle: orderTitle,
-            ),
-          ),
-        );
+        Navigator.of(context, rootNavigator: true).maybePop();
+      }
+
+      // Navigate directly to Chat for this order
+      if (mounted) {
+        context.push('/chat', extra: {
+          'conversationId': conversationId,
+          'otherUserId': adminIdNonNull,
+          'otherUserName': adminDetails['name'] ?? adminDetails['email'] ?? 'Admin',
+          'orderId': orderId,
+          'orderTitle': orderTitle,
+        });
       }
     } catch (e) {
-      Navigator.pop(context); // Close loading if still open
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).maybePop();
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

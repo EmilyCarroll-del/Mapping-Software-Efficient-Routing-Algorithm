@@ -118,6 +118,7 @@ class GoogleAuthService {
         'email': user.email ?? '',
         'photo_url': user.photoURL ?? '',
         'provider': 'google',
+        'userType': 'driver', // Mobile app users are always drivers
         'created_at': Timestamp.now(),
         'last_sign_in': Timestamp.now(),
       });

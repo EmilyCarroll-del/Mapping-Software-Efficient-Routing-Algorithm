@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -7,6 +8,8 @@ import 'package:go_router/go_router.dart';
 import 'dart:io';
 import '../colors.dart';
 import '../services/google_auth_service.dart';
+import '../services/company_service.dart';
+import '../models/company_model.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -29,6 +32,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   
   String? _profileImageUrl;
   File? _selectedImage;
+  
+  final CompanyService _companyService = CompanyService();
+  List<Company> _companies = [];
+  String? _selectedCompanyCode;
+  bool _loadingCompanies = false;
 
   // GraphGo specific stats
   int _totalRoutes = 0;
@@ -41,6 +49,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _loadUserData();
     _loadUserStats();
+    _loadCompanies();
     
     // Listen for auth state changes and reload stats
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
@@ -48,6 +57,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _loadUserStats();
       }
     });
+  }
+
+  Future<void> _loadCompanies() async {
+    setState(() => _loadingCompanies = true);
+    try {
+      _companies = await _companyService.getAllCompanies();
+      // Validate that _selectedCompanyCode exists in the loaded companies
+      // If not, set it to null to prevent dropdown errors
+      if (_selectedCompanyCode != null && _selectedCompanyCode!.isNotEmpty) {
+        final companyExists = _companies.any((c) => c.code == _selectedCompanyCode);
+        if (!companyExists) {
+          _selectedCompanyCode = null;
+          _companyCodeController.text = '';
+        }
+      }
+      setState(() => _loadingCompanies = false);
+    } catch (e) {
+      print('Error loading companies: $e');
+      // If companies fail to load, reset selected company code to avoid errors
+      _selectedCompanyCode = null;
+      setState(() => _loadingCompanies = false);
+    }
   }
 
   @override
@@ -87,7 +118,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _phoneController.text = userData['phone'] ?? '';
           _bioController.text = userData['bio'] ?? '';
           _companyController.text = userData['company'] ?? '';
-          _companyCodeController.text = userData['companyCode'] ?? '';
+          final companyCode = userData['companyCode'] as String?;
+          _companyCodeController.text = companyCode ?? '';
+          _selectedCompanyCode = companyCode;
           _profileImageUrl = userData['profileImageUrl'];
         } else {
           // Create user profile if it doesn't exist
@@ -216,6 +249,128 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _showManualCodeEntryDialog(BuildContext context) async {
+    // Use StatefulBuilder to manage controller lifecycle within dialog
+    String? enteredCode;
+    
+    final result = await showDialog<String?>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        final TextEditingController codeController = TextEditingController();
+        final GlobalKey<FormState> formKey = GlobalKey<FormState>();
+        
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Enter Company Code'),
+              content: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Enter a 5-digit company code:',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: codeController,
+                      keyboardType: TextInputType.number,
+                      maxLength: 5,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Company Code',
+                        hintText: '12345',
+                        border: OutlineInputBorder(),
+                        counterText: '',
+                        helperText: 'Enter exactly 5 digits',
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter a company code';
+                        }
+                        final trimmed = value.trim();
+                        if (trimmed.length != 5) {
+                          return 'Code must be exactly 5 digits';
+                        }
+                        if (!RegExp(r'^\d{5}$').hasMatch(trimmed)) {
+                          return 'Code must contain only numbers';
+                        }
+                        return null;
+                      },
+                      autofocus: true,
+                      onFieldSubmitted: (value) {
+                        if (formKey.currentState!.validate()) {
+                          final code = value.trim();
+                          if (code.length == 5 && RegExp(r'^\d{5}$').hasMatch(code)) {
+                            Navigator.of(dialogContext).pop(code);
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(null),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    if (formKey.currentState!.validate()) {
+                      final code = codeController.text.trim();
+                      if (code.length == 5 && RegExp(r'^\d{5}$').hasMatch(code)) {
+                        Navigator.of(dialogContext).pop(code);
+                      } else {
+                        ScaffoldMessenger.of(dialogContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Invalid code format. Please enter exactly 5 digits.'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    
+    // Update state after dialog closes (controller is already disposed by Flutter)
+    if (result != null && result.isNotEmpty && mounted) {
+      // Use a post-frame callback to ensure we're in a safe state update
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _selectedCompanyCode = result;
+            _companyCodeController.text = result;
+          });
+          
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Company code set: $result'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      });
+    }
+  }
+
   Future<void> _saveProfile() async {
     try {
       setState(() {
@@ -236,7 +391,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'phone': _phoneController.text,
         'bio': _bioController.text,
         'company': _companyController.text,
-        'companyCode': _companyCodeController.text,
+        'companyCode': _selectedCompanyCode ?? '',
         if (_profileImageUrl != null) 'profileImageUrl': _profileImageUrl,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -345,6 +500,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 if (!_isEditing) {
                   // Reset to original values
                   _loadUserData();
+                } else {
+                  // Reload companies when entering edit mode to ensure we have latest list
+                  _loadCompanies();
                 }
               });
             },
@@ -546,25 +704,111 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: _isEditing
-                              ? TextField(
-                                  controller: _companyCodeController,
-                                  decoration: const InputDecoration(
-                                    hintText: 'Enter company code',
-                                    border: InputBorder.none,
-                                  ),
-                                )
-                              : Text(
-                                  _companyCodeController.text.isNotEmpty
-                                      ? _companyCodeController.text
-                                      : 'No company code',
-                                  style: TextStyle(
-                                    color: _companyCodeController.text.isEmpty
-                                        ? Colors.grey[500]
-                                        : null,
-                                    fontWeight: _companyCodeController.text.isNotEmpty
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                  ),
+                              ? _loadingCompanies
+                                  ? const SizedBox(
+                                      height: 48,
+                                      child: Center(child: CircularProgressIndicator()),
+                                    )
+                                  : Builder(
+                                      builder: (context) {
+                                        // For manually entered codes, we allow any value even if not in companies list
+                                        // For dropdown-selected codes, we validate they exist in the list
+                                        String? validValue;
+                                        if (_selectedCompanyCode != null && _selectedCompanyCode!.isNotEmpty) {
+                                          // Check if it's a valid company from the list
+                                          final isInList = _companies.any((c) => c.code == _selectedCompanyCode);
+                                          if (isInList) {
+                                            validValue = _selectedCompanyCode;
+                                          } else {
+                                            // Manually entered code not in list - allow it but don't show as selected in dropdown
+                                            // This prevents dropdown errors while still allowing manual codes
+                                            validValue = null;
+                                          }
+                                        }
+                                        
+                                        return Row(
+                                          children: [
+                                            Expanded(
+                                              child: DropdownButton<String?>(
+                                                value: validValue,
+                                                isExpanded: true,
+                                                hint: const Text('Select company (or leave blank for freelancer)'),
+                                                items: [
+                                                  const DropdownMenuItem<String?>(
+                                                    value: null,
+                                                    child: Text('None (Freelancer)'),
+                                                  ),
+                                                  ..._companies.map((company) {
+                                                    return DropdownMenuItem<String?>(
+                                                      value: company.code,
+                                                      child: Text('${company.name} (${company.code})'),
+                                                    );
+                                                  }),
+                                                ],
+                                                onChanged: (String? value) {
+                                                  setState(() {
+                                                    _selectedCompanyCode = value;
+                                                    _companyCodeController.text = value ?? '';
+                                                  });
+                                                },
+                                                underline: Container(
+                                                  height: 1,
+                                                  decoration: BoxDecoration(
+                                                    border: Border(
+                                                      bottom: BorderSide(
+                                                        color: Colors.grey[300]!,
+                                                        width: 1,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.keyboard),
+                                              tooltip: 'Enter code manually',
+                                              onPressed: () async {
+                                                await _showManualCodeEntryDialog(context);
+                                                // Dialog already updates state internally
+                                              },
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    )
+                              : Builder(
+                                  builder: (context) {
+                                    final companyCode = _companyCodeController.text;
+                                    if (companyCode.isEmpty) {
+                                      return Text(
+                                        'No company code (Freelancer)',
+                                        style: TextStyle(
+                                          color: Colors.grey[500],
+                                        ),
+                                      );
+                                    }
+                                    // Try to find company name in loaded companies list
+                                    final company = _companies.where((c) => c.code == companyCode).isEmpty
+                                        ? null
+                                        : _companies.firstWhere((c) => c.code == companyCode);
+                                    if (company != null) {
+                                      // Company found in list - show name and code
+                                      return Text(
+                                        '${company.name} (${company.code})',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      );
+                                    } else {
+                                      // Company not in list (manually entered) - show code only
+                                      return Text(
+                                        companyCode,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      );
+                                    }
+                                  },
                                 ),
                         ),
                       ],

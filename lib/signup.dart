@@ -46,6 +46,7 @@ class _SignupPageState extends State<SignupPage> {
         'last_name': _lastNameController.text.trim(),
         'email': _emailController.text.trim(),
         'provider': 'email',
+        'userType': 'driver', // Mobile app users are always drivers
         'created_at': Timestamp.now(),
       });
 
