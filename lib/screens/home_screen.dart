@@ -7,7 +7,9 @@ import 'package:location/location.dart';
 import '../providers/delivery_provider.dart';
 import '../services/firestore_service.dart';
 import '../utils/migrate_deliveries.dart';
+import '../widgets/bottom_navigation_bar.dart';
 import '../colors.dart';
+import '../services/notification_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,12 +26,37 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _locationPermissionGranted = false;
   static const LatLng _defaultLocation = LatLng(40.7143, -73.5994); // Hofstra University, Hempstead, NY
   Set<Marker> _markers = {};
+  bool _hasCenteredOnce = false;
+  bool _followMe = true;
+  // If true, keep the map centered on Hofstra University (fixed demo location)
+  bool _useFixedHofstra = true;
   
   // Real order statistics
   final FirestoreService _firestoreService = FirestoreService();
   int _totalOrders = 0;
   int _completedOrders = 0;
   int _inProgressOrders = 0;
+  
+  // Bottom navigation
+  int _currentIndex = 0;
+
+  void _onTabTapped(int index) {
+    setState(() {
+      _currentIndex = index;
+    });
+    
+    switch (index) {
+      case 0:
+        // Already on home
+        break;
+      case 1:
+        context.go('/inbox');
+        break;
+      case 2:
+        context.go('/profile');
+        break;
+    }
+  }
 
   @override
   void initState() {
@@ -83,31 +110,31 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _initializeLocation() async {
     try {
       print('🗺️ Initializing location...');
-      
-      // For now, let's force use Hofstra University location
-      // This ensures the app always shows the correct location
-      print('📍 Using Hofstra University as default location');
-      _currentLocation = LocationData.fromMap({
-        'latitude': _defaultLocation.latitude,
-        'longitude': _defaultLocation.longitude,
-        'accuracy': 100.0,
-        'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
-      });
-      
-      print('✅ Location set to Hofstra: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
-      setState(() {
-        _isLocationLoading = false;
-        _locationPermissionGranted = true;
-      });
-      
-      // Move camera to Hofstra location
-      if (_mapController != null) {
-        _mapController!.animateCamera(
-          CameraUpdate.newLatLng(_defaultLocation),
-        );
+
+      // Fixed Hofstra demo/location mode
+      if (_useFixedHofstra) {
+        _currentLocation = LocationData.fromMap({
+          'latitude': _defaultLocation.latitude,
+          'longitude': _defaultLocation.longitude,
+          'accuracy': 100.0,
+          'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
+        });
+        setState(() {
+          _isLocationLoading = false;
+          _locationPermissionGranted = false;
+          _hasCenteredOnce = true;
+          _followMe = false;
+        });
+        if (_mapController != null) {
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLng(_defaultLocation),
+          );
+        }
+        // Skip live location setup entirely
+        return;
       }
 
-      // Check if location service is enabled for future updates
+      // Ensure location service is enabled
       bool serviceEnabled = await _location.serviceEnabled();
       print('📍 Location service enabled: $serviceEnabled');
       
@@ -116,7 +143,7 @@ class _HomeScreenState extends State<HomeScreen> {
         print('📍 Location service requested: $serviceEnabled');
       }
 
-      // Check location permission for future updates
+      // Request permission
       PermissionStatus permissionGranted = await _location.hasPermission();
       print('🔐 Location permission status: $permissionGranted');
       
@@ -125,29 +152,58 @@ class _HomeScreenState extends State<HomeScreen> {
         print('🔐 Location permission requested: $permissionGranted');
       }
 
-      // Listen to location changes (but keep Hofstra as fallback)
+      final granted = permissionGranted == PermissionStatus.granted ||
+          permissionGranted == PermissionStatus.grantedLimited;
+
+      if (!serviceEnabled || !granted) {
+        setState(() {
+          _isLocationLoading = false;
+          _locationPermissionGranted = false;
+        });
+        return;
+      }
+
+      // Improve update quality
+      await _location.changeSettings(
+        accuracy: LocationAccuracy.high,
+        interval: 1000, // 1s updates
+        distanceFilter: 1, // 1 meter
+      );
+
+      // Get current location once
+      final current = await _location.getLocation();
+      _currentLocation = current;
+      setState(() {
+        _isLocationLoading = false;
+        _locationPermissionGranted = true;
+      });
+      
+      // Center camera once to current position
+      if (_mapController != null && current.latitude != null && current.longitude != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLng(
+            LatLng(current.latitude!, current.longitude!),
+          ),
+        );
+        _hasCenteredOnce = true;
+      }
+
+      // Listen to location changes and update blue dot (Google handles dot),
+      // optionally keep camera centered initially
       _location.onLocationChanged.listen((LocationData locationData) {
         if (mounted) {
           print('🔄 Location updated: ${locationData.latitude}, ${locationData.longitude}');
-          
-          // Only update if we get a reasonable location (not Google HQ)
-          // Check if the location is within reasonable bounds for Hofstra area
-          if (locationData.latitude! > 40.0 && locationData.latitude! < 41.0 && 
-              locationData.longitude! > -74.0 && locationData.longitude! < -73.0) {
-            setState(() {
-              _currentLocation = locationData;
-            });
-            
-            // Update camera position
-            if (_mapController != null) {
+          _currentLocation = locationData;
+          if (_mapController != null) {
+            if (!_hasCenteredOnce || _followMe) {
               _mapController!.animateCamera(
                 CameraUpdate.newLatLng(
-                  LatLng(locationData.latitude!, locationData.longitude!),
+                  LatLng(locationData.latitude ?? _defaultLocation.latitude,
+                      locationData.longitude ?? _defaultLocation.longitude),
                 ),
               );
+              _hasCenteredOnce = true;
             }
-          } else {
-            print('📍 Ignoring location update (outside Hofstra area)');
           }
         }
       });
@@ -165,7 +221,7 @@ class _HomeScreenState extends State<HomeScreen> {
       
       setState(() {
         _isLocationLoading = false;
-        _locationPermissionGranted = true;
+        _locationPermissionGranted = false;
       });
     }
   }
@@ -173,25 +229,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _getCurrentLocation() async {
     try {
       print('📍 Manual location request...');
-      
-      // Force use Hofstra University location
-      _currentLocation = LocationData.fromMap({
-        'latitude': _defaultLocation.latitude,
-        'longitude': _defaultLocation.longitude,
-        'accuracy': 100.0,
-        'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
-      });
-      
-      print('✅ Manual location set to Hofstra: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
-      
-      if (_mapController != null) {
+      final loc = await _location.getLocation();
+      _currentLocation = loc;
+      if (_mapController != null && loc.latitude != null && loc.longitude != null) {
         _mapController!.animateCamera(
-          CameraUpdate.newLatLng(_defaultLocation),
+          CameraUpdate.newLatLng(
+            LatLng(loc.latitude!, loc.longitude!),
+          ),
         );
       }
-      setState(() {}); // Refresh UI
+      setState(() {
+        _hasCenteredOnce = true;
+      });
     } catch (e) {
-      print('❌ Error setting location to Hofstra: $e');
+      print('❌ Error getting current location: $e');
     }
   }
 
@@ -224,8 +275,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             markers: _markers,
             mapType: MapType.normal,
-            myLocationEnabled: _locationPermissionGranted,
-            myLocationButtonEnabled: false, // We'll add our own button
+            myLocationEnabled: !_useFixedHofstra && _locationPermissionGranted,
+            myLocationButtonEnabled: !_useFixedHofstra && _locationPermissionGranted,
             zoomControlsEnabled: true,
             compassEnabled: true,
             mapToolbarEnabled: false,
@@ -330,14 +381,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        // Profile Button
+                        // Notifications Button
                         CircleAvatar(
                           radius: 20,
                           backgroundColor: kPrimaryColor,
                           child: IconButton(
-                            icon: const Icon(Icons.person, color: Colors.white, size: 20),
-                            onPressed: () => context.go('/profile'),
-                            tooltip: 'Profile',
+                            icon: const Icon(Icons.notifications, color: Colors.white, size: 20),
+                            onPressed: () => context.go('/notifications'),
+                            tooltip: 'Notifications',
                           ),
                         ),
                       ] else
@@ -544,18 +595,37 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           
-          // Current Location Button
-          Positioned(
-            bottom: isLoggedIn ? 200 : 100,
-            right: 16,
-            child: FloatingActionButton(
-              onPressed: _getCurrentLocation,
-              backgroundColor: Colors.white,
-              foregroundColor: kPrimaryColor,
-              child: const Icon(Icons.my_location),
-              tooltip: 'Current Location',
+          // Current Location Button (hidden in fixed Hofstra mode)
+          if (!_useFixedHofstra)
+            Positioned(
+              bottom: isLoggedIn ? 200 : 100,
+              right: 16,
+              child: FloatingActionButton(
+                onPressed: _getCurrentLocation,
+                backgroundColor: Colors.white,
+                foregroundColor: kPrimaryColor,
+                child: const Icon(Icons.my_location),
+                tooltip: 'Current Location',
+              ),
             ),
-          ),
+
+          // Follow Me toggle (hidden in fixed Hofstra mode)
+          if (!_useFixedHofstra)
+            Positioned(
+              bottom: isLoggedIn ? 140 : 60,
+              right: 16,
+              child: FloatingActionButton.small(
+                onPressed: () {
+                  setState(() {
+                    _followMe = !_followMe;
+                  });
+                },
+                backgroundColor: _followMe ? kPrimaryColor : Colors.white,
+                foregroundColor: _followMe ? Colors.white : kPrimaryColor,
+                tooltip: _followMe ? 'Following you' : 'Tap to follow',
+                child: Icon(_followMe ? Icons.play_arrow : Icons.pause),
+              ),
+            ),
           
           // Loading Overlay
           if (_isLocationLoading)
@@ -583,6 +653,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
+      bottomNavigationBar: null,
     );
   }
 

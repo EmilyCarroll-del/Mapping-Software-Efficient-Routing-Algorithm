@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/delivery_address.dart';
+import '../services/chat_service.dart';
+import 'chat_page.dart';
 
 class DriverAssignedOrdersScreen extends StatefulWidget {
   const DriverAssignedOrdersScreen({super.key});
@@ -12,6 +14,7 @@ class DriverAssignedOrdersScreen extends StatefulWidget {
 
 class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final ChatService _chatService = ChatService();
   User? _currentUser;
 
   @override
@@ -167,6 +170,26 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
                           ),
                         ),
                       ),
+                      // Chat button for accepted orders
+                      if ((orderData['status'] == 'assigned' || orderData['status'] == 'in_progress')) ...[
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openChatForOrder(orderId, orderData),
+                            icon: const Icon(Icons.chat),
+                            label: const Text('Chat about this order'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF0D2B0D),
+                              side: const BorderSide(color: Color(0xFF0D2B0D)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -268,6 +291,108 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error updating order: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _openChatForOrder(String orderId, Map<String, dynamic> orderData) async {
+    if (_currentUser == null) return;
+
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Get admin ID - try different possible field names
+      String? adminId = orderData['createdBy'] as String? ??
+                        orderData['adminId'] as String? ??
+                        orderData['userId'] as String?;
+
+      // If no adminId in order, try to get it from deliveries collection
+      if (adminId == null) {
+        try {
+          final deliveryDoc = await _firestore.collection('deliveries').doc(orderId).get();
+          if (deliveryDoc.exists) {
+            final deliveryData = deliveryDoc.data();
+            adminId = deliveryData?['createdBy'] as String? ??
+                      deliveryData?['adminId'] as String? ??
+                      deliveryData?['userId'] as String?;
+          }
+        } catch (e) {
+          print('Error getting delivery data: $e');
+        }
+      }
+
+      if (adminId == null) {
+        Navigator.pop(context); // Close loading
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Unable to find the order administrator. Please contact support.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Store in non-nullable variable after null check
+      final adminIdNonNull = adminId!;
+
+      // Get admin user details
+      final adminDetails = await _chatService.getUserDetails(adminIdNonNull);
+      if (adminDetails == null) {
+        Navigator.pop(context); // Close loading
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Administrator not found'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Create or get conversation
+      final orderTitle = '${orderData['streetAddress'] ?? ''}, ${orderData['city'] ?? ''}, ${orderData['state'] ?? ''} ${orderData['zipCode'] ?? ''}';
+      final conversationId = await _chatService.createOrGetConversation(
+        adminIdNonNull,
+        orderId: orderId,
+        orderTitle: orderTitle,
+      );
+
+      Navigator.pop(context); // Close loading
+
+      // Navigate to chat screen
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatPage(
+              conversationId: conversationId,
+              otherUserId: adminIdNonNull,
+              otherUserName: adminDetails['name'] ?? adminDetails['email'] ?? 'Admin',
+              orderId: orderId,
+              orderTitle: orderTitle,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      Navigator.pop(context); // Close loading if still open
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening chat: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );

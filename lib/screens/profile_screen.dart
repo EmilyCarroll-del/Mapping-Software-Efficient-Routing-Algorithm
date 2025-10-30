@@ -25,6 +25,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
   final TextEditingController _companyController = TextEditingController();
+  final TextEditingController _companyCodeController = TextEditingController();
   
   String? _profileImageUrl;
   File? _selectedImage;
@@ -55,6 +56,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _phoneController.dispose();
     _bioController.dispose();
     _companyController.dispose();
+    _companyCodeController.dispose();
     super.dispose();
   }
 
@@ -85,6 +87,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _phoneController.text = userData['phone'] ?? '';
           _bioController.text = userData['bio'] ?? '';
           _companyController.text = userData['company'] ?? '';
+          _companyCodeController.text = userData['companyCode'] ?? '';
           _profileImageUrl = userData['profileImageUrl'];
         } else {
           // Create user profile if it doesn't exist
@@ -233,6 +236,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'phone': _phoneController.text,
         'bio': _bioController.text,
         'company': _companyController.text,
+        'companyCode': _companyCodeController.text,
         if (_profileImageUrl != null) 'profileImageUrl': _profileImageUrl,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -301,6 +305,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: false,
           title: const Text('Driver Profile'),
           backgroundColor: kPrimaryColor,
           foregroundColor: Colors.white,
@@ -313,6 +318,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: kPrimaryColor,
         foregroundColor: Colors.white,
         title: const Text(
@@ -533,6 +539,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     
                     const SizedBox(height: 16),
                     
+                    // Company Code
+                    Row(
+                      children: [
+                        const Icon(Icons.qr_code),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _isEditing
+                              ? TextField(
+                                  controller: _companyCodeController,
+                                  decoration: const InputDecoration(
+                                    hintText: 'Enter company code',
+                                    border: InputBorder.none,
+                                  ),
+                                )
+                              : Text(
+                                  _companyCodeController.text.isNotEmpty
+                                      ? _companyCodeController.text
+                                      : 'No company code',
+                                  style: TextStyle(
+                                    color: _companyCodeController.text.isEmpty
+                                        ? Colors.grey[500]
+                                        : null,
+                                    fontWeight: _companyCodeController.text.isNotEmpty
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                        ),
+                      ],
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    
                     // Phone Number
                     Row(
                       children: [
@@ -605,10 +644,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () {
-                      // Navigate to route history
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Route history coming soon!')),
-                      );
+                      context.go('/route-history');
                     },
                     icon: const Icon(Icons.history),
                     label: const Text('Route History'),

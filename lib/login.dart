@@ -25,28 +25,57 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       print('Starting email login...');
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      final user = FirebaseAuth.instance.currentUser;
+      final user = userCredential.user;
       print('Email login successful: ${user?.email}');
 
-      // Update last sign-in time
-      await GoogleAuthService.updateLastSignIn();
+      // Update last sign-in time (wrap in try-catch to not fail login if this errors)
+      try {
+        await GoogleAuthService.updateLastSignIn();
+      } catch (e) {
+        print('Warning: Failed to update last sign-in time: $e');
+        // Don't fail login if this step fails
+      }
 
-      // Navigate to home and refresh the state
-      if (mounted) {
+      // Wait a bit for auth state to propagate
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Verify user is still logged in
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null && mounted) {
         print('Redirecting to home page...');
         context.go('/');
+        // Force router refresh to trigger redirect logic
+        GoRouter.of(context).refresh();
         print('Redirect command sent');
       }
     } catch (e) {
       print('Email login failed: $e');
       if (mounted) {
+        // Check if user is actually logged in despite the error (common with PigeonUserDetails error)
+        await Future.delayed(const Duration(milliseconds: 200));
+        final user = FirebaseAuth.instance.currentUser;
+        
+        // If user is logged in, don't show error - just redirect silently
+        if (user != null) {
+          print('User logged in despite error, redirecting silently...');
+          context.go('/');
+          GoRouter.of(context).refresh();
+          return;
+        }
+        
+        // Only show error if login actually failed
+        String errorMessage = "Login Failed: ${e.toString()}";
+        if (e.toString().contains('PigeonUserDetails') || 
+            e.toString().contains('type \'List<Object?>\' is not a subtype')) {
+          errorMessage = "Login Failed: Authentication error. Please try again.";
+        }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Login Failed: ${e.toString()}")),
+          SnackBar(content: Text(errorMessage)),
         );
       }
     } finally {
@@ -62,30 +91,66 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final UserCredential? userCredential = await GoogleAuthService.signInWithGoogle();
       
+      // Wait for auth state to propagate
+      await Future.delayed(const Duration(milliseconds: 200));
+      
       // Check if user is signed in (either through successful credential or error handling)
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         if (mounted) {
+          print('Google login successful: ${user.email}');
           context.go('/');
+          // Force router refresh to trigger redirect logic
+          GoRouter.of(context).refresh();
         }
       } else if (userCredential == null) {
         // Handle the case where Google Sign-In had issues but user might still be signed in
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Google Sign-In had issues, but you might still be signed in")),
-        );
         // Check again after a short delay
-        await Future.delayed(const Duration(seconds: 1));
+        await Future.delayed(const Duration(milliseconds: 500));
         final userAfterDelay = FirebaseAuth.instance.currentUser;
         if (userAfterDelay != null && mounted) {
+          print('Google login successful (after delay): ${userAfterDelay.email}');
           context.go('/');
+          GoRouter.of(context).refresh();
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Google Sign-In failed. Please try again.")),
+            );
+          }
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Google Login Failed: ${e.toString()}")),
-      );
+      print('Google login error: $e');
+      
+      // Always check if user is logged in before showing error
+      await Future.delayed(const Duration(milliseconds: 300));
+      final user = FirebaseAuth.instance.currentUser;
+      
+      // If user is logged in, redirect silently without showing error
+      if (user != null && mounted) {
+        print('User logged in despite error, redirecting silently...');
+        context.go('/');
+        GoRouter.of(context).refresh();
+        return;
+      }
+      
+      // Only show error if login actually failed
+      String errorMessage = "Google Login Failed: ${e.toString()}";
+      if (e.toString().contains('PigeonUserDetails') || 
+          e.toString().contains('type \'List<Object?>\' is not a subtype')) {
+        errorMessage = "Google Sign-In failed. Please try again.";
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMessage)),
+        );
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 

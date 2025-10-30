@@ -63,14 +63,20 @@ class GoogleAuthService {
       print('Google Sign-In Error Details: $e');
       print('Error type: ${e.runtimeType}');
       
-      // Handle specific type casting errors
-      if (e.toString().contains('PigeonUserDetails')) {
+      // Handle specific type casting errors (known issue with google_sign_in package)
+      if (e.toString().contains('PigeonUserDetails') || 
+          e.toString().contains('type \'List<Object?>\' is not a subtype')) {
         print('Type casting error detected - this is a known issue with google_sign_in package');
+        // Wait a moment for auth state to update
+        await Future.delayed(const Duration(milliseconds: 300));
         // Check if user is actually signed in despite the error
         final user = _auth.currentUser;
         if (user != null) {
-          print('User is already signed in: ${user.email}');
-          // Return null to indicate success but let the app handle the state
+          print('User is already signed in despite error: ${user.email}');
+          // Update last sign-in time
+          await updateLastSignIn();
+          // Return null to indicate success but let the app handle the redirect
+          // The app will check currentUser and redirect accordingly
           return null;
         }
       }
