@@ -176,24 +176,37 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Stream<QuerySnapshot> _getNotificationsStream() {
-    if (_filterType == 'all') {
-      return _notificationService.getNotifications();
-    }
-    
+    // Avoid index requirements by removing orderBy and sort client-side.
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       return const Stream.empty();
     }
 
-    return FirebaseFirestore.instance
+    final baseQuery = FirebaseFirestore.instance
         .collection('notifications')
-        .where('userId', isEqualTo: currentUser.uid)
+        .where('userId', isEqualTo: currentUser.uid);
+
+    if (_filterType == 'all') {
+      return baseQuery.snapshots();
+    }
+
+    return baseQuery
         .where('type', isEqualTo: _filterType)
-        .orderBy('timestamp', descending: true)
         .snapshots();
   }
 
   List<Map<String, dynamic>> _groupNotificationsByDate(List<QueryDocumentSnapshot> notifications) {
+    // First sort by timestamp desc client-side
+    notifications.sort((a, b) {
+      final ad = a.data() as Map<String, dynamic>;
+      final bd = b.data() as Map<String, dynamic>;
+      final at = ad['timestamp'] as Timestamp?;
+      final bt = bd['timestamp'] as Timestamp?;
+      final adt = at?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bdt = bt?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bdt.compareTo(adt);
+    });
+
     final groups = <String, List<DocumentSnapshot>>{};
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
