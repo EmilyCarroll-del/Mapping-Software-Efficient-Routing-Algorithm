@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../providers/auth_provider.dart';
 import 'inbox.dart'; // Import the InboxPage
 import '../models/delivery_address.dart';
 import '../services/firestore_service.dart';
@@ -22,23 +25,63 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   Set<String> _selectedAddressIds = {};
-  User? _user;
 
   @override
-  void initState() {
-    super.initState();
-    _user = FirebaseAuth.instance.currentUser;
-    FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (mounted) {
-        setState(() {
-          _user = user;
-        });
+  Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final user = authProvider.user;
 
-        if (user == null) {
-          Navigator.of(context).pushReplacementNamed('/login');
-        }
-      }
-    });
+    if (user == null) {
+      // While the user is null, the AuthProvider is still determining the auth state.
+      // Show a loading indicator until the user is fetched.
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.settings, color: Colors.white),
+          onPressed: () => Navigator.of(context).pushNamed('/settings'),
+        ),
+        title: const Text('GraphGo Admin', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.inbox, color: Colors.white),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const InboxPage()),
+              );
+            },
+            tooltip: 'Inbox',
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: FutureBuilder<DocumentSnapshot>(
+              future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+                  return Center(child: Text(snapshot.data!['name'] ?? '', style: const TextStyle(color: Colors.white)));
+                }
+                return const Center(child: Text('', style: TextStyle(color: Colors.white)));
+              },
+            ),
+          ),
+          IconButton(
+            onPressed: () {
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+              authProvider.signOut();
+            },
+            icon: const Icon(Icons.logout, color: Colors.white, size: 18),
+          ),
+        ],
+      ),
+      body: _buildLoggedInView(context, user),
+    );
   }
 
   void _onSelectionChanged(Set<String> selectedIds) {
@@ -48,12 +91,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   void _showAddEditAddressDialog({DeliveryAddress? address}) {
-    if (_user == null) return;
+    final user = Provider.of<AuthProvider>(context, listen: false).user;
+    if (user == null) return;
     showDialog(
       context: context,
       builder: (context) => AddEditAddressDialog(
         address: address,
-        userId: _user!.uid,
+        userId: user.uid,
         onSave: (address) {
           _firestoreService.saveAddress(address);
         },
@@ -62,7 +106,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _showUploadCsvDialog() async {
-    if (_user == null) return;
+    final user = Provider.of<AuthProvider>(context, listen: false).user;
+    if (user == null) return;
 
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -87,7 +132,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           .map((row) {
             try {
               return DeliveryAddress(
-                userId: _user!.uid,
+                userId: user.uid,
                 streetAddress: row[0].toString(),
                 city: row[1].toString(),
                 state: row[2].toString(),
@@ -147,16 +192,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _firestoreService.reassignAddress(addressId);
   }
 
-  void _logout() async {
-    await FirebaseAuth.instance.signOut();
-  }
-
   void _removeDriverRole(String uid) {
     _firestoreService.removeDriverRole(uid);
   }
 
   void _showAssignDriversDialog() async {
-    if (_user == null || _selectedAddressIds.isEmpty) return;
+    final user = Provider.of<AuthProvider>(context, listen: false).user;
+    if (user == null || _selectedAddressIds.isEmpty) return;
 
     final drivers = await _firestoreService.getDrivers().first;
     if (!mounted) return;
@@ -178,47 +220,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.settings, color: Colors.white),
-          onPressed: () => Navigator.of(context).pushNamed('/settings'),
-        ),
-        title: const Text('GraphGo Admin', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.inbox, color: Colors.white),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const InboxPage()),
-              );
-            },
-            tooltip: 'Inbox',
-          ),
-          if (_user != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: Center(child: Text(_user!.email ?? '', style: const TextStyle(color: Colors.white))),
-            ),
-          if (_user != null)
-            IconButton(
-              onPressed: _logout,
-              icon: const Icon(Icons.logout, color: Colors.white, size: 18),
-            ),
-        ],
-      ),
-      body: _user == null ? const Center(child: CircularProgressIndicator()) : _buildLoggedInView(context),
-    );
-  }
-
-  Widget _buildLoggedInView(BuildContext context) {
-    if (_user == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  Widget _buildLoggedInView(BuildContext context, User user) {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Row(
@@ -281,7 +283,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     onEdit: (address) => _showAddEditAddressDialog(address: address),
                     onDelete: _deleteAddress,
                     onReassign: _reassignAddress,
-                    addressesStream: _firestoreService.getAddresses(_user!.uid),
+                    addressesStream: _firestoreService.getAddresses(user.uid),
                     onSelectionChanged: _onSelectionChanged,
                   ),
                 ),

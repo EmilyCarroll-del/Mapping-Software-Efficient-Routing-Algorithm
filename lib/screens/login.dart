@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -44,14 +45,23 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set({'role': _selectedRole}, SetOptions(merge: true));
+      }
+
       _navigateBasedOnRole(_selectedRole);
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: ${e.message}")),
+        SnackBar(content: Text("Login Failed: \${e.message}")),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: ${e.toString()}")),
+        SnackBar(content: Text("Login Failed: \${e.toString()}")),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -62,11 +72,16 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      final UserCredential? userCredential = await GoogleAuthService.signInWithGoogle();
+      await GoogleAuthService.signInWithGoogle();
+      final user = FirebaseAuth.instance.currentUser;
 
-      if (FirebaseAuth.instance.currentUser != null) {
+      if (user != null) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set({'role': _selectedRole}, SetOptions(merge: true));
         _navigateBasedOnRole(_selectedRole);
-      } else if (userCredential == null && mounted) {
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Google Sign-In was cancelled or failed.")),
         );
@@ -74,7 +89,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Google Login Failed: ${e.toString()}")),
+          SnackBar(content: Text("Google Login Failed: \${e.toString()}")),
         );
       }
     } finally {
@@ -192,6 +207,7 @@ class _LoginPageState extends State<LoginPage> {
                           decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
                           obscureText: true,
                           validator: (value) => value!.isEmpty ? "Enter your password" : null,
+                          onFieldSubmitted: (_) => _login(),
                         ),
                         Align(
                           alignment: Alignment.centerRight,

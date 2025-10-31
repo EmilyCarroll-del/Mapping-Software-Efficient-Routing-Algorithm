@@ -51,11 +51,13 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
                   hintText: 'Street, City, State, ZIP Code',
                 ),
                 validator: (value) => value!.isEmpty ? 'Please enter an address' : null,
+                onFieldSubmitted: (_) => _submit(),
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _notesController,
                 decoration: const InputDecoration(labelText: 'Notes (Optional)'),
+                onFieldSubmitted: (_) => _submit(),
               ),
             ],
           ),

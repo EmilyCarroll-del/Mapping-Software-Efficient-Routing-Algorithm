@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/auth_provider.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -127,8 +128,8 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<SettingsProvider>(
-      builder: (context, settings, child) {
+    return Consumer2<SettingsProvider, AuthProvider>(
+      builder: (context, settings, auth, child) {
         final bool darkMode = settings.darkMode;
         final ThemeData currentTheme = Theme.of(context);
 
@@ -150,10 +151,12 @@ class HomeScreen extends StatelessWidget {
               icon: const Icon(Icons.settings, color: Colors.white),
               onPressed: () => Navigator.of(context).pushNamed('/settings'),
             ),
-            title: const Text(
-              'GraphGo',
-              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-            ),
+            title: Consumer<AuthProvider>(builder: (context, auth, child) {
+              return Text(
+                'Welcome, ${auth.user?.displayName ?? 'Guest'}',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+              );
+            }),
             centerTitle: true,
             actions: [
               if (settings.isLoggedIn)

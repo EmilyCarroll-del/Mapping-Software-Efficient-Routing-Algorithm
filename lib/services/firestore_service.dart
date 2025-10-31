@@ -84,7 +84,7 @@ class FirestoreService {
   Stream<List<UserModel>> getDrivers() {
     return _db
         .collection(_usersCollectionPath)
-        .where('role', isEqualTo: 'driver')
+        .where('role', whereIn: ['driver', 'Driver'])
         .snapshots()
         .map((snapshot) =>
             snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
@@ -95,7 +95,7 @@ class FirestoreService {
     return _db
         .collection(_addressesCollectionPath)
         .where('userId', isEqualTo: userId)
-        .where('status', whereIn: ['assigned', 'accepted'])
+        .where('status', whereIn: ['assigned', 'accepted', 'in_progress'])
         .snapshots()
         .map((snapshot) =>
             snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());

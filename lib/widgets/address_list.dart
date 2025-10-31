@@ -9,6 +9,7 @@ class AddressList extends StatefulWidget {
   final Function(String) onDelete;
   final Function(String) onReassign;
   final SelectionChangedCallback onSelectionChanged;
+  final bool isReadOnly;
 
   const AddressList({
     super.key,
@@ -17,6 +18,7 @@ class AddressList extends StatefulWidget {
     required this.onDelete,
     required this.onReassign,
     required this.onSelectionChanged,
+    this.isReadOnly = false,
   });
 
   @override
@@ -75,20 +77,21 @@ class _AddressListState extends State<AddressList> {
 
         return Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Row(
-                children: [
-                  Checkbox(
-                    value: _isSelectAll,
-                    onChanged: (bool? value) {
-                      _toggleSelectAll();
-                    },
-                  ),
-                  const Text('Select All'),
-                ],
+            if (!widget.isReadOnly)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: _isSelectAll,
+                      onChanged: (bool? value) {
+                        _toggleSelectAll();
+                      },
+                    ),
+                    const Text('Select All'),
+                  ],
+                ),
               ),
-            ),
             Expanded(
               child: ListView.builder(
                 itemCount: _currentAddresses.length,
@@ -97,39 +100,43 @@ class _AddressListState extends State<AddressList> {
                   final isSelected = _selectedAddressIds.contains(address.id);
                   final capitalizedStatus = address.status.isEmpty
                       ? ''
-                      : '${address.status[0].toUpperCase()}${address.status.substring(1)}';
+                      : '${address.status[0].toUpperCase()}${address.status.substring(1)}'.replaceAll('_', ' ');
 
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4.0),
                     child: ListTile(
-                      leading: Checkbox(
-                        value: isSelected,
-                        onChanged: (bool? value) {
-                          if (value != null) {
-                            _handleAddressSelection(address.id, value);
-                          }
-                        },
-                      ),
+                      leading: widget.isReadOnly
+                          ? null
+                          : Checkbox(
+                              value: isSelected,
+                              onChanged: (bool? value) {
+                                if (value != null) {
+                                  _handleAddressSelection(address.id, value);
+                                }
+                              },
+                            ),
                       title: Text(address.fullAddress),
                       subtitle: Text('Status: $capitalizedStatus'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (address.status == 'denied')
-                            TextButton(
-                              onPressed: () => widget.onReassign(address.id),
-                              child: const Text('Reassign', style: TextStyle(color: Colors.orange)),
+                      trailing: widget.isReadOnly
+                          ? null
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (address.status == 'denied')
+                                  TextButton(
+                                    onPressed: () => widget.onReassign(address.id),
+                                    child: const Text('Reassign', style: TextStyle(color: Colors.orange)),
+                                  ),
+                                IconButton(
+                                  icon: const Icon(Icons.edit, color: Colors.blue),
+                                  onPressed: () => widget.onEdit(address),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  onPressed: () => widget.onDelete(address.id),
+                                ),
+                              ],
                             ),
-                          IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.blue),
-                            onPressed: () => widget.onEdit(address),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => widget.onDelete(address.id),
-                          ),
-                        ],
-                      ),
                     ),
                   );
                 },

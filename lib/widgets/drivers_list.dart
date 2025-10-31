@@ -33,14 +33,7 @@ class DriversList extends StatelessWidget {
           itemBuilder: (context, index) {
             final driver = drivers[index];
 
-            final String displayTitle;
-            if (driver.displayName != null && driver.displayName!.isNotEmpty) {
-              displayTitle = driver.displayName!;
-            } else if (driver.email != null && driver.email!.contains('@')) {
-              displayTitle = driver.email!.split('@').first;
-            } else {
-              displayTitle = driver.email ?? 'N/A';
-            }
+            final String displayTitle = driver.email?.split('@').first ?? 'N/A';
 
             final role = driver.role ?? 'driver';
             final capitalizedRole =

@@ -4,10 +4,9 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/firestore_service.dart';
 import '../widgets/address_list.dart';
-import '../models/delivery_address.dart';
 
-class AssignedAddressesScreen extends StatelessWidget {
-  const AssignedAddressesScreen({super.key});
+class CompletedAddressesScreen extends StatelessWidget {
+  const CompletedAddressesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -17,17 +16,17 @@ class AssignedAddressesScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Assigned Addresses'),
+        title: const Text('Completed Addresses'),
       ),
       body: user == null
-          ? const Center(child: Text('Please log in to see assigned addresses.'))
+          ? const Center(child: Text('Please log in to see completed addresses.'))
           : AddressList(
-              addressesStream: firestoreService.getAssignedAddresses(user.uid),
+              addressesStream: firestoreService.getCompletedAddressesForAdmin(user.uid),
+              isReadOnly: true,
               onEdit: (address) {},
               onDelete: (addressId) {},
               onReassign: (addressId) {},
               onSelectionChanged: (selectedIds) {},
-              isReadOnly: true,
             ),
     );
   }
