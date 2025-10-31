@@ -9,10 +9,12 @@ class DriverAssignedOrdersScreen extends StatefulWidget {
   const DriverAssignedOrdersScreen({super.key});
 
   @override
-  State<DriverAssignedOrdersScreen> createState() => _DriverAssignedOrdersScreenState();
+  State<DriverAssignedOrdersScreen> createState() =>
+      _DriverAssignedOrdersScreenState();
 }
 
-class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen> {
+class _DriverAssignedOrdersScreenState
+    extends State<DriverAssignedOrdersScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ChatService _chatService = ChatService();
   User? _currentUser;
@@ -35,7 +37,8 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
     if (_currentUser == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Assigned Orders')),
-        body: const Center(child: Text('Please log in to view assigned orders.')),
+        body: const Center(
+            child: Text('Please log in to view assigned orders.')),
       );
     }
 
@@ -49,16 +52,17 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
         stream: _firestore
             .collection('addresses')
             .where('driverId', isEqualTo: _currentUser!.uid)
+            .where('status', whereIn: ['assigned', 'accepted', 'in_progress'])
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          
+
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
-          
+
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(
               child: Column(
@@ -88,7 +92,7 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
             itemBuilder: (context, index) {
               final orderData = orders[index].data() as Map<String, dynamic>;
               final orderId = orders[index].id;
-              
+
               return Card(
                 margin: const EdgeInsets.only(bottom: 16),
                 elevation: 4,
@@ -108,11 +112,13 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: _getStatusColor(orderData['status'] ?? 'assigned'),
+                              color: _getStatusColor(
+                                  orderData['status'] ?? 'assigned'),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              (orderData['status'] ?? 'assigned').toUpperCase(),
+                              (orderData['status'] ?? 'assigned')
+                                  .toUpperCase(),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
@@ -138,11 +144,13 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (orderData['notes'] != null && orderData['notes'].isNotEmpty) ...[
+                      if (orderData['notes'] != null &&
+                          orderData['notes'].isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            const Icon(Icons.note, size: 16, color: Colors.grey),
+                            const Icon(Icons.note,
+                                size: 16, color: Colors.grey),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
@@ -154,42 +162,97 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
                         ),
                       ],
                       const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: () => _updateOrderStatus(orderId, orderData['status']),
-                          icon: Icon(_getActionIcon(orderData['status'] ?? 'assigned')),
-                          label: Text(_getActionText(orderData['status'] ?? 'assigned')),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0D2B0D),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                      // Chat button for accepted orders
-                      if ((orderData['status'] == 'assigned' || orderData['status'] == 'in_progress')) ...[
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: () => _openChatForOrder(orderId, orderData),
-                            icon: const Icon(Icons.chat),
-                            label: const Text('Chat about this order'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF0D2B0D),
-                              side: const BorderSide(color: Color(0xFF0D2B0D)),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                      Builder(builder: (context) {
+                        final status = orderData['status'] ?? 'assigned';
+
+                        if (status == 'assigned') {
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _acceptOrder(orderId),
+                                  icon: const Icon(Icons.check),
+                                  label: const Text('Accept'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
-                      ],
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _denyOrder(orderId),
+                                  icon: const Icon(Icons.close),
+                                  label: const Text('Deny'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        } else {
+                          return Column(
+                            children: [
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () =>
+                                      _updateOrderStatus(orderId, status),
+                                  icon: Icon(_getActionIcon(status)),
+                                  label: Text(_getActionText(status)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0D2B0D),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if ((status == 'accepted' || status == 'in_progress')) ...[
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _openChatForOrder(orderId, orderData),
+                                    icon: const Icon(Icons.chat),
+                                    label:
+                                        const Text('Chat about this order'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor:
+                                          const Color(0xFF0D2B0D),
+                                      side: const BorderSide(
+                                          color: Color(0xFF0D2B0D)),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 12),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        }
+                      }),
                     ],
                   ),
                 ),
@@ -205,6 +268,8 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
     switch (status.toLowerCase()) {
       case 'assigned':
         return Colors.orange;
+      case 'accepted':
+        return Colors.blue;
       case 'in_progress':
         return Colors.blue;
       case 'completed':
@@ -217,6 +282,7 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
   IconData _getActionIcon(String status) {
     switch (status.toLowerCase()) {
       case 'assigned':
+      case 'accepted':
         return Icons.play_arrow;
       case 'in_progress':
         return Icons.check;
@@ -230,6 +296,7 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
   String _getActionText(String status) {
     switch (status.toLowerCase()) {
       case 'assigned':
+      case 'accepted':
         return 'Start Delivery';
       case 'in_progress':
         return 'Mark as Completed';
@@ -242,7 +309,7 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
 
   String _formatDate(dynamic timestamp) {
     if (timestamp == null) return 'Unknown date';
-    
+
     try {
       DateTime date;
       if (timestamp is Timestamp) {
@@ -252,10 +319,46 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       } else {
         return 'Invalid date';
       }
-      
+
       return '${date.day}/${date.month}/${date.year}';
     } catch (e) {
       return 'Invalid date';
+    }
+  }
+
+  Future<void> _acceptOrder(String orderId) async {
+    try {
+      await _firestore.collection('addresses').doc(orderId).update({
+        'status': 'accepted',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error accepting order: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _denyOrder(String orderId) async {
+    try {
+      await _firestore.collection('addresses').doc(orderId).update({
+        'driverId': null,
+        'status': 'denied',
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error denying order: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -264,6 +367,7 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       String newStatus;
       switch (currentStatus.toLowerCase()) {
         case 'assigned':
+        case 'accepted':
           newStatus = 'in_progress';
           break;
         case 'in_progress':
@@ -281,7 +385,8 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Order status updated to ${newStatus.replaceAll('_', ' ')}'),
+            content:
+                Text('Order status updated to ${newStatus.replaceAll('_', ' ')}'),
             backgroundColor: Colors.green,
           ),
         );
@@ -298,7 +403,8 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
     }
   }
 
-  Future<void> _openChatForOrder(String orderId, Map<String, dynamic> orderData) async {
+  Future<void> _openChatForOrder(
+      String orderId, Map<String, dynamic> orderData) async {
     if (_currentUser == null) return;
 
     try {
@@ -313,18 +419,19 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
 
       // Get admin ID - try different possible field names
       String? adminId = orderData['createdBy'] as String? ??
-                        orderData['adminId'] as String? ??
-                        orderData['userId'] as String?;
+          orderData['adminId'] as String? ??
+          orderData['userId'] as String?;
 
       // If no adminId in order, try to get it from deliveries collection
       if (adminId == null) {
         try {
-          final deliveryDoc = await _firestore.collection('deliveries').doc(orderId).get();
+          final deliveryDoc =
+              await _firestore.collection('deliveries').doc(orderId).get();
           if (deliveryDoc.exists) {
             final deliveryData = deliveryDoc.data();
             adminId = deliveryData?['createdBy'] as String? ??
-                      deliveryData?['adminId'] as String? ??
-                      deliveryData?['userId'] as String?;
+                deliveryData?['adminId'] as String? ??
+                deliveryData?['userId'] as String?;
           }
         } catch (e) {
           print('Error getting delivery data: $e');
@@ -336,7 +443,8 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Unable to find the order administrator. Please contact support.'),
+              content: Text(
+                  'Unable to find the order administrator. Please contact support.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -345,7 +453,7 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       }
 
       // Store in non-nullable variable after null check
-      final adminIdNonNull = adminId!;
+      final adminIdNonNull = adminId;
 
       // Get admin user details
       final adminDetails = await _chatService.getUserDetails(adminIdNonNull);
@@ -363,7 +471,8 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
       }
 
       // Create or get conversation
-      final orderTitle = '${orderData['streetAddress'] ?? ''}, ${orderData['city'] ?? ''}, ${orderData['state'] ?? ''} ${orderData['zipCode'] ?? ''}';
+      final orderTitle =
+          '${orderData['streetAddress'] ?? ''}, ${orderData['city'] ?? ''}, ${orderData['state'] ?? ''} ${orderData['zipCode'] ?? ''}';
       final conversationId = await _chatService.createOrGetConversation(
         adminIdNonNull,
         orderId: orderId,
@@ -380,7 +489,8 @@ class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen>
             builder: (context) => ChatPage(
               conversationId: conversationId,
               otherUserId: adminIdNonNull,
-              otherUserName: adminDetails['name'] ?? adminDetails['email'] ?? 'Admin',
+              otherUserName:
+                  adminDetails['name'] ?? adminDetails['email'] ?? 'Admin',
               orderId: orderId,
               orderTitle: orderTitle,
             ),

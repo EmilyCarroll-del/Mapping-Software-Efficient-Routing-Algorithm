@@ -26,7 +26,7 @@ class _SignupPageState extends State<SignupPage> {
     if (value.length < 12) return "Password must be at least 12 characters.";
     if (!RegExp(r'[A-Z]').hasMatch(value)) return "Must contain 1 uppercase letter.";
     if (!RegExp(r'\d').hasMatch(value)) return "Must contain 1 number.";
-    if (!RegExp(r'[!@#$%^&*(),.?\":{}|<>]').hasMatch(value)) return "Must contain 1 special character.";
+    if (!RegExp(r'[!@#\$%^&*(),.?\":{}|<>]').hasMatch(value)) return "Must contain 1 special character.";
     return null;
   }
 
@@ -47,6 +47,7 @@ class _SignupPageState extends State<SignupPage> {
         'email': _emailController.text.trim(),
         'provider': 'email',
         'created_at': Timestamp.now(),
+        'role': 'Driver',
       });
 
       // Navigate to home and refresh the state

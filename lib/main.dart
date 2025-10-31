@@ -73,17 +73,17 @@ void main() async {
   final notificationService = NotificationService();
   FirebaseAuth.instance.authStateChanges().listen((user) {
     if (user != null) {
+      // Set the user's role to 'Driver' on every login
+      FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set({'role': 'Driver'}, SetOptions(merge: true));
+      
       notificationService.initialize();
     } else {
       notificationService.dispose();
     }
   });
-  
-  // Also initialize if user is already logged in
-  final currentUser = FirebaseAuth.instance.currentUser;
-  if (currentUser != null) {
-    notificationService.initialize();
-  }
   
   runApp(const GraphGoApp());
 }

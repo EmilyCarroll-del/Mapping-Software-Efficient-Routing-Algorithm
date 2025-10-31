@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'services/google_auth_service.dart';
 import 'forgot_password.dart';
 import 'colors.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -33,12 +34,12 @@ class _LoginPageState extends State<LoginPage> {
       final user = userCredential.user;
       print('Email login successful: ${user?.email}');
 
-      // Update last sign-in time (wrap in try-catch to not fail login if this errors)
-      try {
-        await GoogleAuthService.updateLastSignIn();
-      } catch (e) {
-        print('Warning: Failed to update last sign-in time: $e');
-        // Don't fail login if this step fails
+      // Update last sign-in time and role
+      if (user != null) {
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'last_sign_in': FieldValue.serverTimestamp(),
+          'role': 'Driver',
+        }, SetOptions(merge: true));
       }
 
       // Wait a bit for auth state to propagate
@@ -90,15 +91,23 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       final UserCredential? userCredential = await GoogleAuthService.signInWithGoogle();
-      
+      final user = userCredential?.user;
+
+      if (user != null) {
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'last_sign_in': FieldValue.serverTimestamp(),
+          'role': 'Driver',
+        }, SetOptions(merge: true));
+      }
+
       // Wait for auth state to propagate
       await Future.delayed(const Duration(milliseconds: 200));
       
       // Check if user is signed in (either through successful credential or error handling)
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
         if (mounted) {
-          print('Google login successful: ${user.email}');
+          print('Google login successful: ${currentUser.email}');
           context.go('/');
           // Force router refresh to trigger redirect logic
           GoRouter.of(context).refresh();

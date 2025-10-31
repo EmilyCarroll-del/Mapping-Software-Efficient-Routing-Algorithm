@@ -120,7 +120,8 @@ class GoogleAuthService {
         'provider': 'google',
         'created_at': Timestamp.now(),
         'last_sign_in': Timestamp.now(),
-      });
+        'role': 'Driver',
+      }, SetOptions(merge: true));
     } catch (e) {
       print('Error saving user to Firestore: $e');
       rethrow;
@@ -134,6 +135,7 @@ class GoogleAuthService {
       if (user != null) {
         await _firestore.collection('users').doc(user.uid).update({
           'last_sign_in': Timestamp.now(),
+          'role': 'Driver',
         });
       }
     } catch (e) {
