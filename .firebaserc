@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "graph-go-bd4f0",
+    "prod": "graph-go-471820"
+  },
+  "targets": {},
+  "etags": {}
+}

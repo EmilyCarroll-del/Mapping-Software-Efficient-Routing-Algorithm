@@ -1,14 +1,15 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../main.dart'; // To get the API key
+import '../config.dart'; // central config for API keys and constants
 
 class AddressValidationService {
-  static const String _apiEndpoint =
-      "https://addressvalidation.googleapis.com/v1:validateAddress?key=$googleApiKey";
+  static const String _baseEndpoint =
+      "https://addressvalidation.googleapis.com/v1:validateAddress";
 
   static Future<Map<String, dynamic>> validateAddress(String address) async {
+    final uri = Uri.parse('$_baseEndpoint?key=$googleApiKey');
     final response = await http.post(
-      Uri.parse(_apiEndpoint),
+      uri,
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
         "address": {

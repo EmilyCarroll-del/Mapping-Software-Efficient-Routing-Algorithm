@@ -11,6 +11,8 @@ import '../widgets/address_list.dart';
 import '../widgets/add_edit_address_dialog.dart';
 import '../widgets/assign_drivers_dialog.dart';
 import '../widgets/drivers_list.dart';
+// 👇 NEW
+import '../services/notification_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -27,18 +29,34 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _user = FirebaseAuth.instance.currentUser;
-    FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (mounted) {
-        setState(() {
-          _user = user;
-        });
 
-        if (user == null) {
-          Navigator.of(context).pushReplacementNamed('/login');
-        }
+    // if admin was already logged in before opening this screen
+    _user = FirebaseAuth.instance.currentUser;
+    if (_user != null) {
+      _initAdminNotifications(_user!);
+    }
+
+    // listen for login / logout
+    FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (!mounted) return;
+
+      setState(() {
+        _user = user;
+      });
+
+      if (user == null) {
+        // kicked out
+        Navigator.of(context).pushReplacementNamed('/login');
+      } else {
+        // admin just logged in -> register FCM token
+        _initAdminNotifications(user);
       }
     });
+  }
+
+  // 👇 NEW: actually call the notification service
+  Future<void> _initAdminNotifications(User user) async {
+    await NotificationService.instance.initForAdmin(user.uid);
   }
 
   void _onSelectionChanged(Set<String> selectedIds) {
@@ -85,20 +103,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       final addresses = list
           .map((row) {
-            try {
-              return DeliveryAddress(
-                userId: _user!.uid,
-                streetAddress: row[0].toString(),
-                city: row[1].toString(),
-                state: row[2].toString(),
-                zipCode: row[3].toString(),
-                notes: row.length > 4 ? row[4].toString() : null,
-              );
-            } catch (e) {
-              print('Error parsing row: $row, error: $e');
-              return null;
-            }
-          })
+        try {
+          return DeliveryAddress(
+            userId: _user!.uid,
+            streetAddress: row[0].toString(),
+            city: row[1].toString(),
+            state: row[2].toString(),
+            zipCode: row[3].toString(),
+            notes: row.length > 4 ? row[4].toString() : null,
+          );
+        } catch (e) {
+          print('Error parsing row: $row, error: $e');
+          return null;
+        }
+      })
           .where((address) => address != null)
           .cast<DeliveryAddress>()
           .toList();

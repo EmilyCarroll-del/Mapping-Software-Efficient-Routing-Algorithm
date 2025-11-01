@@ -10,28 +10,57 @@ class GeocodingService {
 
   /// Convert a delivery address to GPS coordinates
   static Future<DeliveryAddress> geocodeAddress(DeliveryAddress address) async {
-    try {
-      // First try using the geocoding package
-      final locations = await locationFromAddress(address.fullAddress);
-      
-      if (locations.isNotEmpty) {
-        final location = locations.first;
-        return address.copyWith(
-          latitude: location.latitude,
-          longitude: location.longitude,
-        );
+    final street = address.streetAddress.trim();
+    final city = address.city.trim();
+    final state = address.state.trim();
+    final zip = address.zipCode.trim();
+
+    // Build candidate queries from most specific to least
+    final List<String> candidates = [];
+    final full = _buildQueryFromAddress(address);
+    if (full.isNotEmpty) candidates.add(full);
+    if (street.isNotEmpty && zip.isNotEmpty) candidates.add('$street, $zip');
+    if (street.isNotEmpty && city.isNotEmpty) candidates.add('$street, $city${state.isNotEmpty ? ', $state' : ''}');
+    if (city.isNotEmpty && zip.isNotEmpty) candidates.add('$city, $zip');
+    if (zip.isNotEmpty) candidates.add(zip);
+
+    // Deduplicate while preserving order
+    final seen = <String>{};
+    final queries = candidates.where((q) => seen.add(q)).toList();
+
+    // Also try country-appended fallbacks (e.g. add ', USA') to help match
+    final List<String> extra = [];
+    for (final q in queries) {
+      final lower = q.toLowerCase();
+      if (!lower.contains('usa') && !lower.contains('united states') && !lower.contains('u.s.')) {
+        extra.add('$q, USA');
       }
-    } catch (e) {
-      print('Geocoding package failed: $e');
+    }
+    for (final q in extra) {
+      if (seen.add(q)) queries.add(q);
     }
 
-    // Fallback to Google Geocoding API
-    try {
-      return await _geocodeWithGoogle(address);
-    } catch (e) {
-      print('Google Geocoding API failed: $e');
-      throw Exception('Failed to geocode address: ${address.fullAddress}');
+    if (queries.isEmpty) {
+      print('geocodeAddress: no valid address parts for id=${address.id}, skipping geocode');
+      return address;
     }
+
+    for (final q in queries) {
+      try {
+        // small delay to reduce chance of rate-limiting when called in loops
+        await Future.delayed(const Duration(milliseconds: 120));
+        final result = await _geocodeWithGoogle(address, query: q);
+        if (result.hasCoordinates) return result;
+        // otherwise continue to next candidate
+      } catch (e, st) {
+        print('Geocoding attempt failed for id=${address.id} query="$q": $e\n$st');
+        // try next
+      }
+    }
+
+    // none of the queries returned coordinates
+    print('Geocoding failed for all queries for id=${address.id} candidates=${queries}');
+    return address;
   }
 
   /// Batch geocode multiple addresses
@@ -73,28 +102,110 @@ class GeocodingService {
   }
 
   /// Geocode using Google Geocoding API
-  static Future<DeliveryAddress> _geocodeWithGoogle(DeliveryAddress address) async {
-    final url = Uri.parse('$_googleGeocodingUrl?address=${Uri.encodeComponent(address.fullAddress)}&key=$_googleMapsApiKey');
-    
-    final response = await http.get(url);
-    
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      
-      if (data['status'] == 'OK' && data['results'].isNotEmpty) {
-        final result = data['results'][0];
-        final location = result['geometry']['location'];
-        
-        return address.copyWith(
-          latitude: location['lat'].toDouble(),
-          longitude: location['lng'].toDouble(),
-        );
-      } else {
-        throw Exception('Google Geocoding API error: ${data['status']}');
-      }
-    } else {
-      throw Exception('HTTP error: ${response.statusCode}');
+  static Future<DeliveryAddress> _geocodeWithGoogle(DeliveryAddress address, {String? query}) async {
+     final q = (query == null || query.trim().isEmpty) ? address.fullAddress : query;
+     final url = Uri.parse('$_googleGeocodingUrl?address=${Uri.encodeComponent(q)}&key=$_googleMapsApiKey');
+
+     final response = await http.get(url);
+
+     if (response.statusCode != 200) {
+      print('Google Geocoding HTTP error ${response.statusCode} for query="$q": ${response.body}');
+      return address; // return original address on HTTP error
     }
+
+    dynamic data;
+    try {
+      data = json.decode(response.body);
+    } catch (e) {
+      print('Failed to decode Google Geocoding response for query="$q": ${e}');
+      print('Raw response: ${response.body}');
+      return address;
+    }
+
+    final status = data is Map && data['status'] != null ? data['status'].toString() : 'UNKNOWN';
+    if (status != 'OK') {
+      print('Google Geocoding API returned status=$status for query="$q": ${response.body}');
+      return address;
+    }
+
+    final results = (data as Map)['results'];
+    if (results == null || results is! List || results.isEmpty) {
+      print('Google Geocoding API returned no results for query="$q": ${response.body}');
+      return address;
+    }
+
+    final result = results[0];
+    if (result == null || result is! Map) {
+      print('Google Geocoding API result malformed for query="$q": ${response.body}');
+      return address;
+    }
+
+    final geometry = result['geometry'];
+    if (geometry == null || geometry is! Map) {
+      print('Google Geocoding API geometry missing for query="$q": ${response.body}');
+      return address;
+    }
+
+    final location = geometry['location'];
+    if (location == null || location is! Map) {
+      print('Google Geocoding API location missing for query="$q": ${response.body}');
+      return address;
+    }
+
+    final lat = location['lat'];
+    final lng = location['lng'];
+    if (lat == null || lng == null) {
+      print('Google Geocoding API lat/lng missing for query="$q": ${response.body}');
+      return address;
+    }
+
+    try {
+      final doubleLat = (lat as num).toDouble();
+      final doubleLng = (lng as num).toDouble();
+      return address.copyWith(latitude: doubleLat, longitude: doubleLng);
+    } catch (e) {
+      print('Failed to parse lat/lng for query="$q": ${e}');
+      print('Location payload: $location');
+      return address;
+    }
+  }
+
+  static String _buildQueryFromAddress(DeliveryAddress address) {
+    final parts = <String>[];
+
+    String normalizeStreet(String s) {
+      var t = s.trim();
+      // Convert hyphenated house numbers (e.g. 70-30) to '70 30'
+      t = t.replaceAllMapped(RegExp(r'(\d+)-(\d+)'), (m) => '${m[1]} ${m[2]}');
+      // Remove extra punctuation except commas (we use commas to separate parts)
+      t = t.replaceAll(RegExp(r'[/:;#]'), '');
+      return t;
+    }
+
+    String normalizeZip(String? z) {
+      if (z == null) return '';
+      final digits = RegExp(r'\d{5}').firstMatch(z);
+      if (digits != null) return digits.group(0)!;
+      // fallback: strip non-digits
+      return z.replaceAll(RegExp(r'[^0-9]'), '');
+    }
+
+    void addIfValid(String? s, {bool isZip = false}) {
+      if (s == null) return;
+      final raw = s.trim();
+      if (raw.isEmpty) return;
+      if (raw.toLowerCase() == 'null') return;
+      final val = isZip ? normalizeZip(raw) : normalizeStreet(raw);
+      if (val.isEmpty) return;
+      parts.add(val);
+    }
+
+    addIfValid(address.streetAddress);
+    addIfValid(address.city);
+    addIfValid(address.state);
+    addIfValid(address.zipCode, isZip: true);
+
+    return parts.join(', ');
   }
 
   /// Validate if an address format is correct

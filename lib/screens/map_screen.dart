@@ -6,8 +6,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geocoding/geocoding.dart' as geocoding;
 
 import 'inbox.dart'; // Import the InboxPage
-import '../models/delivery_address.dart';
+import '../services/notification_service.dart';
 import '../services/firestore_service.dart';
+import '../services/geocoding_service.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -33,6 +34,11 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
+    // Initialize notification service for the driver when the MapScreen loads.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final driverId = user?.uid ?? 'driver_ashmini_01';
+      NotificationService.instance.initForDriver(driverId);
+    });
     _initializeLocationAndMarkers();
   }
 
@@ -74,28 +80,48 @@ class _MapScreenState extends State<MapScreen> {
     _firestoreService.getDriverDeliveries(userId).listen((addresses) async {
       Set<Marker> newMarkers = {};
       for (var address in addresses) {
-        if (address.streetAddress.isNotEmpty &&
-            address.city.isNotEmpty &&
-            address.state.isNotEmpty &&
-            address.zipCode.isNotEmpty) {
-          try {
-            List<geocoding.Location> locations = await geocoding.locationFromAddress(
-              '${address.streetAddress}, ${address.city}, ${address.state} ${address.zipCode}'
-            );
-            if (locations.isNotEmpty) {
-              final loc = locations.first;
-              newMarkers.add(
-                Marker(
-                  markerId: MarkerId(address.id),
-                  position: LatLng(loc.latitude, loc.longitude),
-                  infoWindow: InfoWindow(title: address.streetAddress, snippet: address.notes),
-                ),
-              );
-            }
-          } catch (e) {
-            print("Error geocoding address: ${e}");
-          }
+        // Build a safe query from the address parts. Some fields may be null/empty
+        // or contain the string 'null' (from bad data). Filter those out.
+        final parts = <String>[];
+        void addIfValid(String? s) {
+          if (s == null) return;
+          final t = s.trim();
+          if (t.isEmpty) return;
+          if (t.toLowerCase() == 'null') return;
+          parts.add(t);
         }
+
+        addIfValid(address.streetAddress);
+        addIfValid(address.city);
+        addIfValid(address.state);
+        addIfValid(address.zipCode);
+
+        if (parts.isEmpty) {
+          // nothing to geocode for this entry — log the raw fields so we can fix bad data
+          print('Skipping geocode id=${address.id} — no valid address parts. '
+              'street="${address.streetAddress}", city="${address.city}", '
+              'state="${address.state}", zip="${address.zipCode}"');
+          continue;
+        }
+
+        // Attempt to geocode via our GeocodingService which has fallbacks + safe query building.
+        try {
+          final geocoded = await GeocodingService.geocodeAddress(address);
+          if (geocoded.hasCoordinates) {
+            newMarkers.add(
+              Marker(
+                markerId: MarkerId(address.id),
+                position: LatLng(geocoded.latitude!, geocoded.longitude!),
+                infoWindow: InfoWindow(title: address.streetAddress, snippet: address.notes),
+              ),
+            );
+          } else {
+            print('GeocodingService returned no coordinates for id=${address.id} (query may have failed)');
+          }
+        } catch (e, st) {
+          print('GeocodingService error for id=${address.id}: $e\n$st');
+        }
+        // small delay could be added here if a large batch causes rate-limit issues
       }
       if (mounted) {
         setState(() => _markers = newMarkers);

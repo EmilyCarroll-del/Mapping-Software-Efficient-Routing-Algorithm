@@ -51,16 +51,16 @@ class DeliveryAddress {
 
   factory DeliveryAddress.fromJson(Map<String, dynamic> json) => DeliveryAddress(
     id: json['id'],
-    userId: json['userId'],
-    streetAddress: json['streetAddress'],
-    city: json['city'],
-    state: json['state'],
-    zipCode: json['zipCode'],
-    latitude: json['latitude']?.toDouble(),
-    longitude: json['longitude']?.toDouble(),
-    notes: json['notes'],
-    createdAt: DateTime.parse(json['createdAt']),
-    driverId: json['driverId'],
+    userId: json['userId'] ?? '',
+    streetAddress: (json['streetAddress'] ?? '').toString(),
+    city: (json['city'] ?? '').toString(),
+    state: (json['state'] ?? '').toString(),
+    zipCode: (json['zipCode'] ?? '').toString(),
+    latitude: json['latitude'] == null ? null : (json['latitude'] as num).toDouble(),
+    longitude: json['longitude'] == null ? null : (json['longitude'] as num).toDouble(),
+    notes: json['notes']?.toString(),
+    createdAt: json['createdAt'] == null ? DateTime.now() : DateTime.parse(json['createdAt']),
+    driverId: json['driverId']?.toString(),
     status: json['status'] ?? 'pending',
   );
 

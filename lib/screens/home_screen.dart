@@ -1,9 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
+import 'package:graph_go/services/notification_service.dart' as notif_service;
 
-class HomeScreen extends StatelessWidget {
+// NOTE: analysis touch to refresh imports
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Delay reading the provider until after the first frame so context is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final settings = Provider.of<SettingsProvider>(context, listen: false);
+      if (settings.isLoggedIn) {
+        // hardcode driver id for now as in the instructions
+        notif_service.NotificationService.instance.initForDriver('driver_ashmini_01');
+      }
+    });
+  }
 
   void _handleLogout(BuildContext context) {
     showGeneralDialog(
