@@ -1,11 +1,25 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+/// Service for managing chat conversations between users.
+/// 
+/// COMPANY CODE CHAT RULES:
+/// Company codes are the PRIMARY way to determine who can chat with whom:
+/// 
+/// - Company Drivers (with companyCode): Can only chat with admins who have the same companyCode
+/// - Freelance Drivers (no companyCode): Can chat with any admin
+/// - Drivers: Cannot chat with other drivers
+/// - Admins: Can chat with drivers based on the driver's company code (rules enforced from driver side)
 class ChatService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Create or get existing conversation between two users
+  /// Create or get existing conversation between two users.
+  /// 
+  /// Enforces company code rules:
+  /// - Company drivers can only chat with matching company admins
+  /// - Freelance drivers can chat with any admin
+  /// - Drivers cannot chat with other drivers
   Future<String> createOrGetConversation(
     String otherUserId, {
     String? orderId,
@@ -46,6 +60,8 @@ class ChatService {
     }
 
     // Enforce company code and user type rules for chat
+    // Company codes are PRIMARY identifier for determining chat permissions
+    
     // If current user is a driver (mobile app user)
     if (currentUserType == 'driver') {
       // Drivers cannot chat with other drivers
@@ -54,7 +70,7 @@ class ChatService {
       }
       
       // All admins must have a companyCode (enforced in web app signup)
-      // Drivers with companyCode can only chat with admins from same company
+      // Company drivers (with companyCode) can only chat with admins from same company
       if (currentCompanyCode != null && currentCompanyCode.isNotEmpty) {
         if (otherCompanyCode != currentCompanyCode) {
           throw Exception('You can only chat with admins from your company');

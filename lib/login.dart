@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'services/google_auth_service.dart';
+import 'services/profile_service.dart';
 import 'forgot_password.dart';
 import 'colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -34,12 +35,34 @@ class _LoginPageState extends State<LoginPage> {
       final user = userCredential.user;
       print('Email login successful: ${user?.email}');
 
-      // Update last sign-in time and role
+      // Update last sign-in time and role for driver profile
       if (user != null) {
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'last_sign_in': FieldValue.serverTimestamp(),
-          'role': 'Driver',
-        }, SetOptions(merge: true));
+        final profileService = ProfileService();
+        // Check if driver profile exists, if not create it
+        final profileExists = await profileService.profileExists(user.uid, 'driver');
+        if (profileExists) {
+          await profileService.updateProfile(
+            user.uid,
+            'driver',
+            {
+              'last_sign_in': FieldValue.serverTimestamp(),
+              'role': 'Driver',
+            },
+          );
+        } else {
+          // Create driver profile if doesn't exist (might be existing user without profile)
+          await profileService.createProfile(
+            user.uid,
+            'driver',
+            {
+              'email': user.email ?? '',
+              'provider': 'email',
+              'userType': 'driver',
+              'role': 'Driver',
+              'last_sign_in': FieldValue.serverTimestamp(),
+            },
+          );
+        }
       }
 
       // Wait a bit for auth state to propagate

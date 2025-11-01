@@ -120,9 +120,21 @@ final GoRouter _router = GoRouter(
       return '/';
     }
     
-    // Note: Mobile app is exclusively for drivers. Admin functionality is web-only.
-    // All mobile app signups automatically set userType: 'driver'
-    // All admin users MUST have a companyCode (required during web app signup)
+    // COMPANY CODE SYSTEM - USER TYPE RULES:
+    // 
+    // Mobile app is exclusively for drivers. Admin functionality is web-only.
+    // 
+    // DRIVERS (Mobile App):
+    //   - All mobile app signups automatically set userType: 'driver'
+    //   - Company code is OPTIONAL for drivers
+    //     * With companyCode: Linked to company (can only work with matching admins)
+    //     * Without companyCode: Freelancer (can work with any admin)
+    //     * Company code can be added/updated in profile screen
+    // 
+    // ADMINS (Web App Only):
+    //   - All admin users MUST have a companyCode (required during web app signup)
+    //   - Company Admins: Share companyCode (e.g., FedEx, DHL, UPS, Amazon)
+    //   - Individual Admins: Have unique companyCode (freelancers looking for drivers)
     
     // No automatic redirect to login - let the home screen handle it
     return null; // No redirect needed

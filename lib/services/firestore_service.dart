@@ -3,7 +3,24 @@ import '../models/delivery_address.dart';
 
 /// Service for managing Firestore operations related to deliveries and drivers.
 /// 
-/// Order Assignment Logic (for web app implementation):
+/// COMPANY CODE SYSTEM - PRIMARY USER LINKING METHODOLOGY
+/// 
+/// Company codes are the PRIMARY way to identify and link users:
+/// 
+/// ADMIN USERS (Web App Only):
+///   - Company Admins: Work for big delivery companies (FedEx, DHL, UPS, Amazon)
+///     * MUST have companyCode (required)
+///     * Multiple admins can share the same companyCode
+///   - Individual Admins: Freelancers looking for truck drivers
+///     * MUST have companyCode (required)
+///     * Each individual admin has their own unique companyCode
+/// 
+/// DRIVER USERS (Mobile App Only):
+///   - Company Drivers: Have companyCode → linked to company via matching code
+///     * Can only work with admins who have the same companyCode
+///   - Freelance Drivers: No companyCode (null/empty) → can work with any admin
+/// 
+/// ORDER ASSIGNMENT LOGIC (for web app implementation):
 /// - Company drivers (with companyCode): Only receive orders from admins
 ///   with the same companyCode
 /// - Freelance drivers (no companyCode): Can receive orders from any admin
@@ -102,5 +119,140 @@ class FirestoreService {
         .where('status', isEqualTo: 'in_progress')
         .snapshots()
         .map((snapshot) => snapshot.docs.length);
+  }
+
+  /// Get available drivers for an admin based on company code linking rules.
+  /// 
+  /// Company Code Linking Rules:
+  /// - Company drivers (with companyCode): Only visible to admins with matching companyCode
+  /// - Freelance drivers (no companyCode): Visible to all admins
+  /// 
+  /// Args:
+  ///   - adminCompanyCode: The company code of the admin (required)
+  /// 
+  /// Returns: Stream of user documents that represent available drivers
+  Stream<List<Map<String, dynamic>>> getAvailableDriversForAdmin(String adminCompanyCode) {
+    // Get all drivers
+    // Note: Firestore doesn't support OR queries directly, so we need to:
+    // 1. Get drivers with matching companyCode
+    // 2. Get freelance drivers (no companyCode)
+    // 3. Combine and filter client-side or use multiple queries
+    
+    return _db
+        .collection(_usersCollectionPath)
+        .where('userType', isEqualTo: 'driver')
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs
+          .where((doc) {
+            final data = doc.data();
+            final driverCompanyCode = data['companyCode'] as String?;
+            
+            // Show drivers with matching companyCode OR freelance drivers (no code)
+            return driverCompanyCode == null || 
+                   driverCompanyCode.isEmpty || 
+                   driverCompanyCode == adminCompanyCode;
+          })
+          .map((doc) => {
+            'id': doc.id,
+            ...doc.data(),
+          })
+          .toList();
+    });
+  }
+
+  /// Get drivers linked to a specific company code.
+  /// 
+  /// Returns all drivers (both company and freelance) that can work with the given company code.
+  Future<List<Map<String, dynamic>>> getDriversByCompanyCode(String companyCode) async {
+    try {
+      // Get company drivers with matching code
+      final companyDrivers = await _db
+          .collection(_usersCollectionPath)
+          .where('userType', isEqualTo: 'driver')
+          .where('companyCode', isEqualTo: companyCode)
+          .get();
+
+      // Get freelance drivers (no companyCode)
+      final allDrivers = await _db
+          .collection(_usersCollectionPath)
+          .where('userType', isEqualTo: 'driver')
+          .get();
+
+      final freelanceDrivers = allDrivers.docs
+          .where((doc) {
+            final data = doc.data();
+            final code = data['companyCode'] as String?;
+            return code == null || code.isEmpty;
+          })
+          .toList();
+
+      // Combine results
+      final allAvailableDrivers = [
+        ...companyDrivers.docs,
+        ...freelanceDrivers,
+      ];
+
+      return allAvailableDrivers.map((doc) => {
+        'id': doc.id,
+        ...doc.data(),
+      }).toList();
+    } catch (e) {
+      print('Error getting drivers by company code: $e');
+      return [];
+    }
+  }
+
+  /// Get admins that a driver can communicate/work with based on company code.
+  /// 
+  /// Rules:
+  /// - Company drivers (with companyCode): Can only see admins with matching companyCode
+  /// - Freelance drivers (no companyCode): Can see all admins
+  /// 
+  /// Args:
+  ///   - driverCompanyCode: The company code of the driver (null/empty for freelancers)
+  /// 
+  /// Returns: Stream of admin user documents
+  Stream<List<Map<String, dynamic>>> getAvailableAdminsForDriver(String? driverCompanyCode) {
+    if (driverCompanyCode == null || driverCompanyCode.isEmpty) {
+      // Freelance drivers can see all admins
+      return _db
+          .collection(_usersCollectionPath)
+          .where('userType', isEqualTo: 'admin')
+          .snapshots()
+          .map((snapshot) => snapshot.docs
+              .map((doc) => {
+                'id': doc.id,
+                ...doc.data(),
+              })
+              .toList());
+    } else {
+      // Company drivers can only see admins with matching companyCode
+      return _db
+          .collection(_usersCollectionPath)
+          .where('userType', isEqualTo: 'admin')
+          .where('companyCode', isEqualTo: driverCompanyCode)
+          .snapshots()
+          .map((snapshot) => snapshot.docs
+              .map((doc) => {
+                'id': doc.id,
+                ...doc.data(),
+              })
+              .toList());
+    }
+  }
+
+  /// Check if a driver and admin can work together based on company codes.
+  /// 
+  /// Returns true if:
+  /// - Driver is freelance (no companyCode) → can work with any admin
+  /// - Driver has companyCode matching admin's companyCode
+  bool canDriverWorkWithAdmin(String? driverCompanyCode, String adminCompanyCode) {
+    if (driverCompanyCode == null || driverCompanyCode.isEmpty) {
+      // Freelance driver can work with any admin
+      return true;
+    }
+    // Company driver can only work with matching company admin
+    return driverCompanyCode == adminCompanyCode;
   }
 }

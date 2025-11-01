@@ -9,6 +9,8 @@ import 'dart:io';
 import '../colors.dart';
 import '../services/google_auth_service.dart';
 import '../services/company_service.dart';
+import '../services/profile_service.dart';
+import '../services/code_assignment_service.dart';
 import '../models/company_model.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -27,16 +29,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
-  final TextEditingController _companyController = TextEditingController();
   final TextEditingController _companyCodeController = TextEditingController();
   
   String? _profileImageUrl;
   File? _selectedImage;
   
   final CompanyService _companyService = CompanyService();
+  final ProfileService _profileService = ProfileService();
+  final CodeAssignmentService _codeAssignmentService = CodeAssignmentService();
   List<Company> _companies = [];
   String? _selectedCompanyCode;
   bool _loadingCompanies = false;
+  Company? _detectedCompany; // Company detected by code range
 
   // GraphGo specific stats
   int _totalRoutes = 0;
@@ -86,7 +90,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _bioController.dispose();
-    _companyController.dispose();
     _companyCodeController.dispose();
     super.dispose();
   }
@@ -94,8 +97,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Refresh stats when screen becomes active
+    // Refresh stats and user data when screen becomes active
     _loadUserStats();
+    _loadUserData();
   }
 
   Future<void> _loadUserData() async {
@@ -106,24 +110,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       _user = FirebaseAuth.instance.currentUser;
       if (_user != null) {
-        // Load user profile data from Firestore
-        DocumentSnapshot userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_user!.uid)
-            .get();
+        // Load driver profile data from separate document: users/{uid}_driver
+        final userData = await _profileService.getProfile(_user!.uid, 'driver');
 
-        if (userDoc.exists) {
-          Map<String, dynamic> userData = userDoc.data() as Map<String, dynamic>;
-          _nameController.text = userData['name'] ?? _user!.displayName ?? '';
+        if (userData != null) {
+          // Get name from first_name + last_name or name field
+          final firstName = userData['first_name'] ?? '';
+          final lastName = userData['last_name'] ?? '';
+          final name = userData['name'] ?? (firstName.isNotEmpty || lastName.isNotEmpty 
+              ? '$firstName $lastName'.trim() 
+              : _user!.displayName ?? '');
+          
+          _nameController.text = name;
           _phoneController.text = userData['phone'] ?? '';
           _bioController.text = userData['bio'] ?? '';
-          _companyController.text = userData['company'] ?? '';
           final companyCode = userData['companyCode'] as String?;
           _companyCodeController.text = companyCode ?? '';
           _selectedCompanyCode = companyCode;
-          _profileImageUrl = userData['profileImageUrl'];
+          _profileImageUrl = userData['profileImageUrl'] ?? userData['photo_url'];
+          
+          // Debug: Log loaded company code
+          print('Profile loaded - Company code: $companyCode');
         } else {
-          // Create user profile if it doesn't exist
+          // Create driver profile if it doesn't exist
           _nameController.text = _user!.displayName ?? '';
           await _createUserProfile();
         }
@@ -139,18 +148,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _createUserProfile() async {
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_user!.uid)
-          .set({
-        'name': _user!.displayName ?? '',
-        'email': _user!.email,
-        'phone': '',
-        'bio': '',
-        'company': '',
-        'profileImageUrl': _user!.photoURL,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      // Create driver profile in separate document: users/{uid}_driver
+      await _profileService.createProfile(
+        _user!.uid,
+        'driver',
+        {
+          'first_name': _user!.displayName?.split(' ').first ?? '',
+          'last_name': _user!.displayName?.split(' ').skip(1).join(' ') ?? '',
+          'name': _user!.displayName ?? '',
+          'email': _user!.email,
+          'phone': '',
+          'bio': '',
+          'company': '',
+          'profileImageUrl': _user!.photoURL,
+          'photo_url': _user!.photoURL,
+          'provider': 'email',
+          'userType': 'driver',
+          'role': 'Driver',
+        },
+      );
     } catch (e) {
       print('Error creating user profile: $e');
     }
@@ -382,23 +398,97 @@ class _ProfileScreenState extends State<ProfileScreen> {
         await _uploadProfileImage();
       }
 
-      // Save profile data to Firestore
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_user!.uid)
-          .update({
-        'name': _nameController.text,
-        'phone': _phoneController.text,
-        'bio': _bioController.text,
-        'company': _companyController.text,
-        'companyCode': _selectedCompanyCode ?? '',
-        if (_profileImageUrl != null) 'profileImageUrl': _profileImageUrl,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      // Save driver profile data to separate document: users/{uid}_driver
+      final nameParts = _nameController.text.trim().split(' ');
+      final firstName = nameParts.isNotEmpty ? nameParts.first : '';
+      final lastName = nameParts.length > 1 ? nameParts.skip(1).join(' ') : '';
+      
+      // Debug: Log save attempt
+      print('Saving profile - Company code: $_selectedCompanyCode');
+      
+      // Claim code if it's an admin-generated code
+      String? companyNameToSave;
+      if (_selectedCompanyCode != null && _selectedCompanyCode!.isNotEmpty) {
+        try {
+          // Try to claim the code (will auto-regenerate admin's code)
+          final newAdminCode = await _codeAssignmentService.claimCode(
+            code: _selectedCompanyCode!,
+            driverId: _user!.uid,
+          );
+          
+          if (newAdminCode != null) {
+            // Code was successfully claimed and admin got new code
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Code claimed successfully! Admin has been assigned a new code.'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          } else {
+            // Code not in assignments - might be manually entered
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Code saved successfully!'),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+          
+          // Detect company name from code
+          final codeValue = int.tryParse(_selectedCompanyCode!);
+          if (codeValue != null) {
+            final company = await _companyService.getCompanyByCodeRange(codeValue);
+            if (company != null) {
+              companyNameToSave = company.name;
+            }
+          }
+        } catch (e) {
+          // Code already claimed or error - show error but still save profile
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Code warning: ${e.toString()}'),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          
+          // Still try to detect company name even if code claim failed
+          final codeValue = int.tryParse(_selectedCompanyCode!);
+          if (codeValue != null) {
+            final company = await _companyService.getCompanyByCodeRange(codeValue);
+            if (company != null) {
+              companyNameToSave = company.name;
+            }
+          }
+        }
+      }
+      
+      await _profileService.updateProfile(
+        _user!.uid,
+        'driver',
+        {
+          'first_name': firstName,
+          'last_name': lastName,
+          'name': _nameController.text,
+          'phone': _phoneController.text,
+          'bio': _bioController.text,
+          'company': companyNameToSave,
+          'companyCode': _selectedCompanyCode ?? '',
+          if (_profileImageUrl != null) 'profileImageUrl': _profileImageUrl,
+        },
+      );
+
+      // Debug: Log successful save
+      print('Profile saved - Company code: ${_selectedCompanyCode ?? 'None'}');
 
       setState(() {
         _isEditing = false;
       });
+      
+      // Reload user data to refresh the UI
+      await _loadUserData();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -588,6 +678,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       color: Colors.grey[600],
                     ),
                   ),
+                  
+                  // Driver Type Indicator with Company Name
+                  const SizedBox(height: 8),
+                  FutureBuilder<Company?>(
+                    future: () async {
+                      final code = _companyCodeController.text.trim();
+                      if (code.isEmpty) return null;
+                      final codeValue = int.tryParse(code);
+                      if (codeValue != null) {
+                        return await _companyService.getCompanyByCodeRange(codeValue);
+                      }
+                      return null;
+                    }(),
+                    builder: (context, snapshot) {
+                      final companyCode = _companyCodeController.text;
+                      final isCompanyDriver = companyCode.isNotEmpty;
+                      final company = snapshot.data;
+                      
+                      String driverTypeText = 'Freelance Driver';
+                      if (isCompanyDriver && company != null) {
+                        driverTypeText = 'Company Driver - ${company.name}';
+                      } else if (isCompanyDriver) {
+                        driverTypeText = 'Company Driver';
+                      }
+                      
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isCompanyDriver 
+                              ? kPrimaryColor.withOpacity(0.1)
+                              : Colors.orange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isCompanyDriver 
+                                ? kPrimaryColor.withOpacity(0.3)
+                                : Colors.orange.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isCompanyDriver ? Icons.business : Icons.person_outline,
+                              size: 16,
+                              color: isCompanyDriver ? kPrimaryColor : Colors.orange,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                driverTypeText,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: isCompanyDriver ? kPrimaryColor : Colors.orange,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -667,37 +820,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const SizedBox(height: 16),
                     
-                    // Company
-                    Row(
-                      children: [
-                        const Icon(Icons.business),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _isEditing
-                              ? TextField(
-                                  controller: _companyController,
-                                  decoration: const InputDecoration(
-                                    hintText: 'Enter company name',
-                                    border: InputBorder.none,
-                                  ),
-                                )
-                              : Text(
-                                  _companyController.text.isNotEmpty
-                                      ? _companyController.text
-                                      : 'No company specified',
-                                  style: TextStyle(
-                                    color: _companyController.text.isEmpty
-                                        ? Colors.grey[500]
-                                        : null,
-                                  ),
-                                ),
-                        ),
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 16),
-                    
                     // Company Code
+                    // Company Code is the PRIMARY way to link drivers to companies
+                    // - With companyCode: Linked to company (can only work with matching admins)
+                    // - Without companyCode: Freelancer (can work with any admin)
                     Row(
                       children: [
                         const Icon(Icons.qr_code),
@@ -726,50 +852,91 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                           }
                                         }
                                         
-                                        return Row(
+                                        return Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Expanded(
-                                              child: DropdownButton<String?>(
-                                                value: validValue,
-                                                isExpanded: true,
-                                                hint: const Text('Select company (or leave blank for freelancer)'),
-                                                items: [
-                                                  const DropdownMenuItem<String?>(
-                                                    value: null,
-                                                    child: Text('None (Freelancer)'),
-                                                  ),
-                                                  ..._companies.map((company) {
-                                                    return DropdownMenuItem<String?>(
-                                                      value: company.code,
-                                                      child: Text('${company.name} (${company.code})'),
-                                                    );
-                                                  }),
-                                                ],
-                                                onChanged: (String? value) {
-                                                  setState(() {
-                                                    _selectedCompanyCode = value;
-                                                    _companyCodeController.text = value ?? '';
-                                                  });
-                                                },
-                                                underline: Container(
-                                                  height: 1,
-                                                  decoration: BoxDecoration(
-                                                    border: Border(
-                                                      bottom: BorderSide(
-                                                        color: Colors.grey[300]!,
-                                                        width: 1,
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: DropdownButton<String?>(
+                                                    value: validValue,
+                                                    isExpanded: true,
+                                                    hint: const Text('Select company (or leave blank for freelancer)'),
+                                                    items: [
+                                                      const DropdownMenuItem<String?>(
+                                                        value: null,
+                                                        child: Text('None (Freelancer)'),
+                                                      ),
+                                                      ..._companies.map((company) {
+                                                        String displayText = company.name;
+                                                        if (company.codeRangeStart != null && company.codeRangeEnd != null) {
+                                                          displayText = '${company.name} (${company.codeRangeStart}-${company.codeRangeEnd})';
+                                                        } else {
+                                                          displayText = '${company.name} (${company.code})';
+                                                        }
+                                                        return DropdownMenuItem<String?>(
+                                                          value: company.code,
+                                                          child: Text(displayText),
+                                                        );
+                                                      }),
+                                                    ],
+                                                    onChanged: (String? value) {
+                                                      setState(() {
+                                                        _selectedCompanyCode = value;
+                                                        _companyCodeController.text = value ?? '';
+                                                      });
+                                                    },
+                                                    underline: Container(
+                                                      height: 1,
+                                                      decoration: BoxDecoration(
+                                                        border: Border(
+                                                          bottom: BorderSide(
+                                                            color: Colors.grey[300]!,
+                                                            width: 1,
+                                                          ),
+                                                        ),
                                                       ),
                                                     ),
                                                   ),
                                                 ),
-                                              ),
+                                                IconButton(
+                                                  icon: const Icon(Icons.keyboard),
+                                                  tooltip: 'Enter code manually',
+                                                  onPressed: () async {
+                                                    await _showManualCodeEntryDialog(context);
+                                                    // Dialog already updates state internally
+                                                  },
+                                                ),
+                                              ],
                                             ),
-                                            IconButton(
-                                              icon: const Icon(Icons.keyboard),
-                                              tooltip: 'Enter code manually',
-                                              onPressed: () async {
-                                                await _showManualCodeEntryDialog(context);
-                                                // Dialog already updates state internally
+                                            const SizedBox(height: 4),
+                                            FutureBuilder<Company?>(
+                                              future: () async {
+                                                final code = _companyCodeController.text.trim();
+                                                if (code.isEmpty) return null;
+                                                final codeValue = int.tryParse(code);
+                                                if (codeValue != null) {
+                                                  return await _companyService.getCompanyByCodeRange(codeValue);
+                                                }
+                                                // Try exact match as fallback
+                                                return await _companyService.getCompanyByCode(code);
+                                              }(),
+                                              builder: (context, snapshot) {
+                                                final company = snapshot.data;
+                                                final hasCode = _companyCodeController.text.trim().isNotEmpty;
+                                                String message = hasCode
+                                                    ? (company != null
+                                                        ? 'Company driver - linked to ${company.name}'
+                                                        : 'Company driver - linked to company')
+                                                    : 'Freelance driver - can work with any admin';
+                                                return Text(
+                                                  message,
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey[600],
+                                                    fontStyle: FontStyle.italic,
+                                                  ),
+                                                );
                                               },
                                             ),
                                           ],
@@ -780,34 +947,89 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   builder: (context) {
                                     final companyCode = _companyCodeController.text;
                                     if (companyCode.isEmpty) {
-                                      return Text(
-                                        'No company code (Freelancer)',
-                                        style: TextStyle(
-                                          color: Colors.grey[500],
-                                        ),
+                                      return Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'No company code',
+                                            style: TextStyle(
+                                              color: Colors.grey[500],
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          Text(
+                                            'Freelance Driver - Can work with any admin',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey[500],
+                                              fontStyle: FontStyle.italic,
+                                            ),
+                                          ),
+                                        ],
                                       );
                                     }
-                                    // Try to find company name in loaded companies list
-                                    final company = _companies.where((c) => c.code == companyCode).isEmpty
-                                        ? null
-                                        : _companies.firstWhere((c) => c.code == companyCode);
-                                    if (company != null) {
-                                      // Company found in list - show name and code
-                                      return Text(
-                                        '${company.name} (${company.code})',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      );
-                                    } else {
-                                      // Company not in list (manually entered) - show code only
-                                      return Text(
-                                        companyCode,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      );
-                                    }
+                                    // Try to find company by code range or exact match
+                                    return FutureBuilder<Company?>(
+                                      future: () async {
+                                        final codeValue = int.tryParse(companyCode);
+                                        if (codeValue != null) {
+                                          final rangeMatch = await _companyService.getCompanyByCodeRange(codeValue);
+                                          if (rangeMatch != null) return rangeMatch;
+                                        }
+                                        // Fallback to exact match
+                                        final exactMatch = await _companyService.getCompanyByCode(companyCode);
+                                        return exactMatch;
+                                      }(),
+                                      builder: (context, snapshot) {
+                                        final company = snapshot.data;
+                                        if (snapshot.connectionState == ConnectionState.waiting) {
+                                          return const Text('Loading...');
+                                        }
+                                        if (company != null) {
+                                          // Company found in list - show name and code
+                                          return Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '${company.name} (${companyCode})',
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              Text(
+                                                'Company Driver - Linked to ${company.name}',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey[600],
+                                                  fontStyle: FontStyle.italic,
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        } else {
+                                          // Company not in list (manually entered) - show code only
+                                          return Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Company Code: $companyCode',
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              Text(
+                                                'Company Driver - Linked via company code',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey[600],
+                                                  fontStyle: FontStyle.italic,
+                                                ),
+                                              ),
+                                            ],
+                                          );
+                                        }
+                                      },
+                                    );
                                   },
                                 ),
                         ),

@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'profile_service.dart';
 
 class GoogleAuthService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
@@ -109,20 +110,32 @@ class GoogleAuthService {
     return _googleSignIn.currentUser;
   }
 
-  /// Save user data to Firestore
+  /// Save user data to Firestore.
+  /// 
+  /// Creates a driver user profile in separate document: users/{uid}_driver
+  /// This allows same email to have separate admin and driver profiles
+  /// Company code is OPTIONAL and can be added later in the profile screen.
+  /// - With companyCode: Driver is linked to company
+  /// - Without companyCode: Driver is freelancer (can work with any admin)
   static Future<void> _saveUserToFirestore(User user) async {
     try {
-      await _firestore.collection('users').doc(user.uid).set({
-        'first_name': user.displayName?.split(' ').first ?? '',
-        'last_name': user.displayName?.split(' ').last ?? '',
-        'email': user.email ?? '',
-        'photo_url': user.photoURL ?? '',
-        'provider': 'google',
-        'userType': 'driver', // Mobile app users are always drivers
-        'created_at': Timestamp.now(),
-        'last_sign_in': Timestamp.now(),
-        'role': 'Driver',
-      }, SetOptions(merge: true));
+      final profileService = ProfileService();
+      await profileService.createProfile(
+        user.uid,
+        'driver',
+        {
+          'first_name': user.displayName?.split(' ').first ?? '',
+          'last_name': user.displayName?.split(' ').last ?? '',
+          'email': user.email ?? '',
+          'photo_url': user.photoURL ?? '',
+          'provider': 'google',
+          'userType': 'driver', // Mobile app users are always drivers
+          'last_sign_in': Timestamp.now(),
+          'role': 'Driver',
+          // Note: companyCode is optional for drivers - can be set in profile screen
+          // If not set, driver is a freelancer who can work with any admin
+        },
+      );
     } catch (e) {
       print('Error saving user to Firestore: $e');
       rethrow;
@@ -134,10 +147,16 @@ class GoogleAuthService {
     try {
       final user = _auth.currentUser;
       if (user != null) {
-        await _firestore.collection('users').doc(user.uid).update({
-          'last_sign_in': Timestamp.now(),
-          'role': 'Driver',
-        });
+        final profileService = ProfileService();
+        // Update driver profile (mobile app)
+        await profileService.updateProfile(
+          user.uid,
+          'driver',
+          {
+            'last_sign_in': Timestamp.now(),
+            'role': 'Driver',
+          },
+        );
       }
     } catch (e) {
       print('Error updating last sign-in: $e');

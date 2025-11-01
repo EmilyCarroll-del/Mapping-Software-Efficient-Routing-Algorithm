@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'services/google_auth_service.dart';
+import 'services/profile_service.dart';
 import 'colors.dart';
 
 class SignupPage extends StatefulWidget {
@@ -41,15 +42,26 @@ class _SignupPageState extends State<SignupPage> {
         password: _passwordController.text.trim(),
       );
 
-      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-        'first_name': _firstNameController.text.trim(),
-        'last_name': _lastNameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'provider': 'email',
-        'userType': 'driver', // Mobile app users are always drivers
-        'created_at': Timestamp.now(),
-        'role': 'Driver',
-      });
+      // Create driver user profile in separate document: users/{uid}_driver
+      // This allows same email to have separate admin and driver profiles
+      // - With companyCode: Driver is linked to company (can only work with matching admins)
+      // - Without companyCode: Driver is freelancer (can work with any admin)
+      // Company code can be added later in the profile screen
+      final profileService = ProfileService();
+      await profileService.createProfile(
+        userCredential.user!.uid,
+        'driver',
+        {
+          'first_name': _firstNameController.text.trim(),
+          'last_name': _lastNameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'provider': 'email',
+          'userType': 'driver', // Mobile app users are always drivers
+          'role': 'Driver',
+          // Note: companyCode is optional for drivers - can be set in profile screen
+          // If not set, driver is a freelancer who can work with any admin
+        },
+      );
 
       // Navigate to home and refresh the state
       if (mounted) {
