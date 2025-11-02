@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/firestore_service.dart';
 import '../widgets/address_list.dart';
-import '../models/delivery_address.dart';
 
 class AssignedAddressesScreen extends StatelessWidget {
   const AssignedAddressesScreen({super.key});
@@ -28,6 +27,7 @@ class AssignedAddressesScreen extends StatelessWidget {
               onReassign: (addressId) {},
               onSelectionChanged: (selectedIds) {},
               isReadOnly: true,
+              showSectionHeaders: false,
             ),
     );
   }

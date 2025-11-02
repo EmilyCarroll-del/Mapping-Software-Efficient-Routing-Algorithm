@@ -47,7 +47,7 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
+      if (user != null && _selectedRole != 'Admin') {
         await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
@@ -75,7 +75,7 @@ class _LoginPageState extends State<LoginPage> {
       await GoogleAuthService.signInWithGoogle();
       final user = FirebaseAuth.instance.currentUser;
 
-      if (user != null) {
+      if (user != null && _selectedRole != 'Admin') {
         await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)

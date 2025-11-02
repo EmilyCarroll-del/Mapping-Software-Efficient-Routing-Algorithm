@@ -21,6 +21,7 @@ class AssignAddressDialog extends StatefulWidget {
 class _AssignAddressDialogState extends State<AssignAddressDialog> {
   String? _selectedDriverId;
   String? _selectedAddressId;
+  bool _isAddressReserved = false;
 
   @override
   Widget build(BuildContext context) {
@@ -49,11 +50,26 @@ class _AssignAddressDialogState extends State<AssignAddressDialog> {
             value: _selectedAddressId,
             hint: const Text('Select an address'),
             onChanged: (value) {
-              setState(() {
-                _selectedAddressId = value;
-              });
+              final selectedAddress = widget.addresses.firstWhere((address) => address.id == value);
+              if (selectedAddress.status == 'reserved') {
+                setState(() {
+                  _isAddressReserved = true;
+                  _selectedAddressId = value;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('This address can\'t be assigned because it is reserved for an order.'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              } else {
+                setState(() {
+                  _isAddressReserved = false;
+                  _selectedAddressId = value;
+                });
+              }
             },
-            items: widget.addresses.where((address) => address.driverId == null).map((address) {
+            items: widget.addresses.map((address) {
               return DropdownMenuItem(
                 value: address.id,
                 child: Text(address.fullAddress),
@@ -68,7 +84,7 @@ class _AssignAddressDialogState extends State<AssignAddressDialog> {
           child: const Text('Cancel'),
         ),
         ElevatedButton(
-          onPressed: (_selectedDriverId != null && _selectedAddressId != null)
+          onPressed: (_selectedDriverId != null && _selectedAddressId != null && !_isAddressReserved)
               ? () {
                   widget.onAssign(_selectedAddressId!, _selectedDriverId!);
                   Navigator.of(context).pop();

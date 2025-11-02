@@ -230,6 +230,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.of(context).pushNamed('/view-orders'),
+                      icon: const Icon(Icons.view_list),
+                      label: const Text('View Orders'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                        backgroundColor: Colors.indigo,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.of(context).pushNamed('/assigned-addresses'),
+                      icon: const Icon(Icons.assignment_turned_in),
+                      label: const Text('View Assigned Addresses'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                        backgroundColor: Colors.indigo,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
                 Wrap(
                   spacing: 16.0,
                   runSpacing: 8.0,
@@ -242,22 +269,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                       ),
                     ),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pushNamed('/add-order');
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Order'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      ),
+                    ),
                     OutlinedButton.icon(
                       onPressed: _showUploadCsvDialog,
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Upload CSV'),
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                      ),
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: () => Navigator.of(context).pushNamed('/assigned-addresses'),
-                      icon: const Icon(Icons.assignment_turned_in),
-                      label: const Text('View Assigned Addresses'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                        backgroundColor: Colors.indigo,
-                        foregroundColor: Colors.white,
                       ),
                     ),
                     if (_selectedAddressIds.isNotEmpty)

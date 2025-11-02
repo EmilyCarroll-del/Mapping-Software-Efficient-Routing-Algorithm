@@ -10,8 +10,10 @@ import 'providers/graph_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/delivery_provider.dart';
 import 'providers/auth_provider.dart';
+import 'services/firestore_service.dart';
 
 // Screens
+import 'screens/add_order_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/map_screen.dart';
 import 'screens/settings_screen.dart';
@@ -22,6 +24,7 @@ import 'screens/forgot_password.dart';
 import 'screens/admin_dashboard_screen.dart';
 import 'screens/assigned_addresses_screen.dart';
 import 'screens/driver_assignments_screen.dart';
+import 'screens/view_orders_screen.dart';
 
 const String googleApiKey = "AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74";
 
@@ -45,6 +48,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        Provider<FirestoreService>(create: (_) => FirestoreService()),
         ChangeNotifierProvider(create: (_) => GraphProvider()),
         ChangeNotifierProvider(create: (_) => DeliveryProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
@@ -91,8 +95,10 @@ class MyApp extends StatelessWidget {
               "/settings": (context) => const SettingsScreen(),
               "/profile": (context) => const ProfileScreen(),
               "/admin-dashboard": (context) => const AdminDashboardScreen(),
+              "/add-order": (context) => const AddOrderScreen(),
               "/assigned-addresses": (context) => AssignedAddressesScreen(),
               "/driver-assignments": (context) => const DriverAssignmentsScreen(),
+              "/view-orders": (context) => const ViewOrdersScreen(),
             },
           );
         },

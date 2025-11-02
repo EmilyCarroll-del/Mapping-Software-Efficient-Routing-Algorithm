@@ -1,3 +1,5 @@
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 
 class DeliveryAddress {
@@ -44,27 +46,30 @@ class DeliveryAddress {
     'latitude': latitude,
     'longitude': longitude,
     'notes': notes,
-    'createdAt': createdAt.toIso8601String(),
+    'createdAt': createdAt,
     'driverId': driverId,
     'status': status,
   };
 
-  factory DeliveryAddress.fromJson(Map<String, dynamic> json) => DeliveryAddress(
-    id: json['id'],
-    userId: json['userId'],
-    streetAddress: json['streetAddress'],
-    city: json['city'],
-    state: json['state'],
-    zipCode: json['zipCode'],
-    latitude: json['latitude']?.toDouble(),
-    longitude: json['longitude']?.toDouble(),
-    notes: json['notes'],
-    createdAt: DateTime.parse(json['createdAt']),
-    driverId: json['driverId'],
-    status: json['status'] ?? 'pending',
-  );
+  factory DeliveryAddress.fromJson(Map<String, dynamic> json) {
+    return DeliveryAddress(
+      id: json['id'],
+      userId: json['userId'],
+      streetAddress: json['streetAddress'],
+      city: json['city'],
+      state: json['state'],
+      zipCode: json['zipCode'],
+      latitude: json['latitude']?.toDouble(),
+      longitude: json['longitude']?.toDouble(),
+      notes: json['notes'],
+      createdAt: (json['createdAt'] as Timestamp).toDate(),
+      driverId: json['driverId'],
+      status: json['status'] ?? 'pending',
+    );
+  }
 
   DeliveryAddress copyWith({
+    String? id,
     String? userId,
     String? streetAddress,
     String? city,
@@ -73,20 +78,23 @@ class DeliveryAddress {
     double? latitude,
     double? longitude,
     String? notes,
+    DateTime? createdAt,
     String? driverId,
     String? status,
-  }) => DeliveryAddress(
-    id: id,
-    userId: userId ?? this.userId,
-    streetAddress: streetAddress ?? this.streetAddress,
-    city: city ?? this.city,
-    state: state ?? this.state,
-    zipCode: zipCode ?? this.zipCode,
-    latitude: latitude ?? this.latitude,
-    longitude: longitude ?? this.longitude,
-    notes: notes ?? this.notes,
-    createdAt: createdAt,
-    driverId: driverId ?? this.driverId,
-    status: status ?? this.status,
-  );
+  }) {
+    return DeliveryAddress(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      streetAddress: streetAddress ?? this.streetAddress,
+      city: city ?? this.city,
+      state: state ?? this.state,
+      zipCode: zipCode ?? this.zipCode,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      notes: notes ?? this.notes,
+      createdAt: createdAt ?? this.createdAt,
+      driverId: driverId ?? this.driverId,
+      status: status ?? this.status,
+    );
+  }
 }
