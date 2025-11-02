@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 // Primary color for GraphGo branding
 const Color kPrimaryColor = Color(0xFF6B46C1); // Deep purple
 
+// Admin colors (Green theme for administrative control)
+const Color kAdminGreen = Color(0xFF2E7D32); // Dark green for authority
+const Color kAdminAccent = Color(0xFF4CAF50); // Lighter green for accents
+
 // Background colors for light and dark themes
 const Color kLightBackground = Color(0xFFFFFFFF); // White
 const Color kDarkBackground = Color(0xFF121212); // Dark gray

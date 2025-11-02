@@ -22,6 +22,9 @@ import 'screens/forgot_password.dart';
 import 'screens/admin_dashboard_screen.dart';
 import 'screens/assigned_addresses_screen.dart';
 import 'screens/driver_assignments_screen.dart';
+import 'screens/my_drivers_screen.dart';
+import 'screens/admin_route_history_screen.dart';
+import 'screens/active_codes_screen.dart';
 
 const String googleApiKey = "AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74";
 
@@ -90,6 +93,9 @@ class MyApp extends StatelessWidget {
               "/map": (context) => const MapScreen(),
               "/settings": (context) => const SettingsScreen(),
               "/profile": (context) => const ProfileScreen(),
+              "/my-drivers": (context) => const MyDriversScreen(),
+              "/admin-route-history": (context) => const AdminRouteHistoryScreen(),
+              "/active-codes": (context) => const ActiveCodesScreen(),
               "/admin-dashboard": (context) => const AdminDashboardScreen(),
               "/assigned-addresses": (context) => AssignedAddressesScreen(),
               "/driver-assignments": (context) => const DriverAssignmentsScreen(),

@@ -5,12 +5,16 @@ class UserModel {
   final String? email;
   final String? displayName;
   final String? role;
+  final String? userType; // 'admin' or 'driver'
+  final String? companyCode; // Optional for admin users
 
   UserModel({
     required this.uid,
     this.email,
     this.displayName,
     this.role,
+    this.userType,
+    this.companyCode,
   });
 
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
@@ -20,6 +24,8 @@ class UserModel {
       email: data['email'],
       displayName: data['displayName'],
       role: data['role'],
+      userType: data['userType'],
+      companyCode: data['companyCode'],
     );
   }
 }

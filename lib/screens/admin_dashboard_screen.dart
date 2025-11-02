@@ -10,6 +10,7 @@ import '../providers/auth_provider.dart';
 import 'inbox.dart'; // Import the InboxPage
 import '../models/delivery_address.dart';
 import '../services/firestore_service.dart';
+import '../services/profile_service.dart';
 import '../widgets/address_list.dart';
 import '../widgets/add_edit_address_dialog.dart';
 import '../widgets/assign_drivers_dialog.dart';
@@ -24,6 +25,7 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final ProfileService _profileService = ProfileService();
   Set<String> _selectedAddressIds = {};
 
   @override
@@ -61,11 +63,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
           Padding(
             padding: const EdgeInsets.only(right: 8.0),
-            child: FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
+            child: FutureBuilder<Map<String, dynamic>?>(
+              future: _profileService.getProfile(user.uid, 'admin'),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
-                  return Center(child: Text(snapshot.data!['name'] ?? '', style: const TextStyle(color: Colors.white)));
+                  final userData = snapshot.data;
+                  // Try multiple possible name fields
+                  final firstName = userData?['first_name'] ?? '';
+                  final lastName = userData?['last_name'] ?? '';
+                  final userName = userData?['name'] ?? 
+                                  (firstName.isNotEmpty || lastName.isNotEmpty
+                                      ? '$firstName $lastName'.trim()
+                                      : userData?['displayName'] ?? 
+                                        user.email?.split('@')[0] ?? 
+                                        'User');
+                  final companyCode = userData?['companyCode'] as String?;
+                  
+                  return InkWell(
+                    onTap: () => Navigator.of(context).pushNamed('/profile'),
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.person, color: Colors.white, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              userName.isNotEmpty ? userName : 'User',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                            ),
+                            if (companyCode != null && companyCode.isNotEmpty) ...[
+                              const Text(' • ', style: TextStyle(color: Colors.white70)),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  companyCode,
+                                  style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 18),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
                 }
                 return const Center(child: Text('', style: TextStyle(color: Colors.white)));
               },
@@ -257,6 +310,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                         backgroundColor: Colors.indigo,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.of(context).pushNamed('/admin-route-history'),
+                      icon: const Icon(Icons.history),
+                      label: const Text('View Route History'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                        backgroundColor: const Color(0xFF2E7D32), // kAdminGreen
                         foregroundColor: Colors.white,
                       ),
                     ),

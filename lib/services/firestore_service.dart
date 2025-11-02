@@ -167,4 +167,64 @@ class FirestoreService {
       'status': 'assigned',
     });
   }
+
+  // Get completed deliveries for a specific driver
+  Stream<List<DeliveryAddress>> getDriverCompletedAddresses(String driverId) {
+    return _db
+        .collection(_addressesCollectionPath)
+        .where('driverId', isEqualTo: driverId)
+        .where('status', isEqualTo: 'completed')
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map((doc) {
+              final data = doc.data();
+              return DeliveryAddress.fromJson({
+                'id': doc.id,
+                ...data,
+              });
+            }).toList());
+  }
+
+  // Get completed deliveries for multiple drivers
+  Future<List<DeliveryAddress>> getAllDriversCompletedAddresses(List<String> driverIds) async {
+    if (driverIds.isEmpty) return [];
+
+    try {
+      final List<DeliveryAddress> allAddresses = [];
+      
+      // Firestore doesn't support OR queries efficiently, so we fetch for each driver
+      // For better performance, we could use Future.wait for parallel queries
+      final futures = driverIds.map((driverId) =>
+        _db
+            .collection(_addressesCollectionPath)
+            .where('driverId', isEqualTo: driverId)
+            .where('status', isEqualTo: 'completed')
+            .get()
+      );
+
+      final results = await Future.wait(futures);
+      
+      for (final snapshot in results) {
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          try {
+            allAddresses.add(DeliveryAddress.fromJson({
+              'id': doc.id,
+              ...data,
+            }));
+          } catch (e) {
+            print('Error parsing address ${doc.id}: $e');
+          }
+        }
+      }
+
+      // Sort by createdAt descending (newest first)
+      allAddresses.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      return allAddresses;
+    } catch (e) {
+      print('Error fetching completed addresses: $e');
+      return [];
+    }
+  }
 }
