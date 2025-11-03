@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 
 class DeliveryAddress {
@@ -21,36 +22,48 @@ class DeliveryAddress {
     this.longitude,
     this.notes,
     DateTime? createdAt,
-  }) : id = id ?? const Uuid().v4(),
-       createdAt = createdAt ?? DateTime.now();
+  })  : id = id ?? const Uuid().v4(),
+        createdAt = createdAt ?? DateTime.now();
 
   String get fullAddress => '$streetAddress, $city, $state $zipCode';
 
   bool get hasCoordinates => latitude != null && longitude != null;
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'streetAddress': streetAddress,
-    'city': city,
-    'state': state,
-    'zipCode': zipCode,
-    'latitude': latitude,
-    'longitude': longitude,
-    'notes': notes,
-    'createdAt': createdAt.toIso8601String(),
-  };
+        'id': id,
+        'streetAddress': streetAddress,
+        'city': city,
+        'state': state,
+        'zipCode': zipCode,
+        'latitude': latitude,
+        'longitude': longitude,
+        'notes': notes,
+        'createdAt': createdAt.toIso8601String(),
+      };
 
-  factory DeliveryAddress.fromJson(Map<String, dynamic> json) => DeliveryAddress(
-    id: json['id'],
-    streetAddress: json['streetAddress'],
-    city: json['city'],
-    state: json['state'],
-    zipCode: json['zipCode'],
-    latitude: json['latitude']?.toDouble(),
-    longitude: json['longitude']?.toDouble(),
-    notes: json['notes'],
-    createdAt: DateTime.parse(json['createdAt']),
-  );
+  factory DeliveryAddress.fromJson(Map<String, dynamic> json) {
+    return DeliveryAddress(
+      id: json['id'],
+      streetAddress: json['streetAddress'],
+      city: json['city'],
+      state: json['state'],
+      zipCode: json['zipCode'],
+      latitude: json['latitude']?.toDouble(),
+      longitude: json['longitude']?.toDouble(),
+      notes: json['notes'],
+      createdAt: _parseDate(json['createdAt']),
+    );
+  }
+
+  static DateTime _parseDate(dynamic date) {
+    if (date is Timestamp) {
+      return date.toDate();
+    } else if (date is String) {
+      return DateTime.parse(date);
+    } else {
+      return DateTime.now();
+    }
+  }
 
   DeliveryAddress copyWith({
     String? streetAddress,
@@ -60,15 +73,16 @@ class DeliveryAddress {
     double? latitude,
     double? longitude,
     String? notes,
-  }) => DeliveryAddress(
-    id: id,
-    streetAddress: streetAddress ?? this.streetAddress,
-    city: city ?? this.city,
-    state: state ?? this.state,
-    zipCode: zipCode ?? this.zipCode,
-    latitude: latitude ?? this.latitude,
-    longitude: longitude ?? this.longitude,
-    notes: notes ?? this.notes,
-    createdAt: createdAt,
-  );
+  }) =>
+      DeliveryAddress(
+        id: id,
+        streetAddress: streetAddress ?? this.streetAddress,
+        city: city ?? this.city,
+        state: state ?? this.state,
+        zipCode: zipCode ?? this.zipCode,
+        latitude: latitude ?? this.latitude,
+        longitude: longitude ?? this.longitude,
+        notes: notes ?? this.notes,
+        createdAt: createdAt,
+      );
 }

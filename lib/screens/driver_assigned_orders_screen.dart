@@ -1,9 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../models/delivery_address.dart';
-import '../services/chat_service.dart';
-import 'chat_page.dart';
+import 'package:intl/intl.dart';
+import '../models/order.dart' as app_order;
 
 class DriverAssignedOrdersScreen extends StatefulWidget {
   const DriverAssignedOrdersScreen({super.key});
@@ -13,11 +14,15 @@ class DriverAssignedOrdersScreen extends StatefulWidget {
       _DriverAssignedOrdersScreenState();
 }
 
-class _DriverAssignedOrdersScreenState
-    extends State<DriverAssignedOrdersScreen> {
+class _DriverAssignedOrdersScreenState extends State<DriverAssignedOrdersScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final ChatService _chatService = ChatService();
   User? _currentUser;
+
+  StreamSubscription? _addressesSubscription;
+  StreamSubscription? _ordersSubscription;
+  final _ordersController = StreamController<List<app_order.Order>>();
+  List<app_order.Order> _addressDocs = [];
+  List<app_order.Order> _orderDocs = [];
 
   @override
   void initState() {
@@ -28,8 +33,63 @@ class _DriverAssignedOrdersScreenState
         setState(() {
           _currentUser = user;
         });
+        if (user != null) {
+          _listenToStreams();
+        } else {
+          _cancelSubscriptions();
+        }
       }
     });
+
+    if (_currentUser != null) {
+      _listenToStreams();
+    }
+  }
+
+  void _listenToStreams() {
+    _cancelSubscriptions(); // Cancel any existing subscriptions
+
+    final statuses = ['assigned', 'accepted', 'in_progress'];
+
+    _addressesSubscription = _firestore
+        .collection('addresses')
+        .where('driverId', isEqualTo: _currentUser!.uid)
+        .where('status', whereIn: statuses)
+        .snapshots()
+        .listen((snapshot) {
+      _addressDocs = snapshot.docs.map((doc) => app_order.Order.fromAddressDoc(doc)).toList();
+      _combineAndSort();
+    });
+
+    _ordersSubscription = _firestore
+        .collection('orders')
+        .where('driverIds', arrayContains: _currentUser!.uid)
+        .where('status', whereIn: statuses)
+        .snapshots()
+        .listen((snapshot) {
+      _orderDocs = snapshot.docs.map((doc) => app_order.Order.fromOrderDoc(doc)).toList();
+      _combineAndSort();
+    });
+  }
+
+  void _combineAndSort() {
+    final allOrders = [..._addressDocs, ..._orderDocs];
+    allOrders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (!_ordersController.isClosed) {
+      _ordersController.add(allOrders);
+    }
+  }
+
+  void _cancelSubscriptions() {
+    _addressesSubscription?.cancel();
+    _ordersSubscription?.cancel();
+  }
+
+  @override
+  void dispose() {
+    _cancelSubscriptions();
+    _ordersController.close();
+    super.dispose();
   }
 
   @override
@@ -37,8 +97,7 @@ class _DriverAssignedOrdersScreenState
     if (_currentUser == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Assigned Orders')),
-        body: const Center(
-            child: Text('Please log in to view assigned orders.')),
+        body: const Center(child: Text('Please log in to view assigned orders.')),
       );
     }
 
@@ -48,14 +107,10 @@ class _DriverAssignedOrdersScreenState
         backgroundColor: const Color(0xFF0D2B0D),
         foregroundColor: Colors.white,
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _firestore
-            .collection('addresses')
-            .where('driverId', isEqualTo: _currentUser!.uid)
-            .where('status', whereIn: ['assigned', 'accepted', 'in_progress'])
-            .snapshots(),
+      body: StreamBuilder<List<app_order.Order>>(
+        stream: _ordersController.stream,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -63,203 +118,282 @@ class _DriverAssignedOrdersScreenState
             return Center(child: Text('Error: ${snapshot.error}'));
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
             return const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.inbox_outlined, size: 64, color: Colors.grey),
+                  Icon(Icons.image_outlined, size: 64, color: Colors.grey),
                   SizedBox(height: 16),
-                  Text(
-                    'No assigned orders',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
-                  ),
+                  Text('No assigned orders', style: TextStyle(fontSize: 18, color: Colors.grey)),
                   SizedBox(height: 8),
-                  Text(
-                    'You will see your assigned orders here',
-                    style: TextStyle(color: Colors.grey),
-                  ),
+                  Text('You will see your assigned orders here', style: TextStyle(color: Colors.grey)),
                 ],
               ),
             );
           }
 
-          final orders = snapshot.data!.docs;
+          final orders = snapshot.data!;
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: orders.length,
             itemBuilder: (context, index) {
-              final orderData = orders[index].data() as Map<String, dynamic>;
-              final orderId = orders[index].id;
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 16),
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _getStatusColor(
-                                  orderData['status'] ?? 'assigned'),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              (orderData['status'] ?? 'assigned')
-                                  .toUpperCase(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            _formatDate(orderData['createdAt']),
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        '${orderData['streetAddress'] ?? ''}, ${orderData['city'] ?? ''}, ${orderData['state'] ?? ''} ${orderData['zipCode'] ?? ''}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      if (orderData['notes'] != null &&
-                          orderData['notes'].isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Icon(Icons.note,
-                                size: 16, color: Colors.grey),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                orderData['notes'],
-                                style: const TextStyle(color: Colors.grey),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: 16),
-                      Builder(builder: (context) {
-                        final status = orderData['status'] ?? 'assigned';
-
-                        if (status == 'assigned') {
-                          return Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _acceptOrder(orderId),
-                                  icon: const Icon(Icons.check),
-                                  label: const Text('Accept'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: () => _denyOrder(orderId),
-                                  icon: const Icon(Icons.close),
-                                  label: const Text('Deny'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        } else {
-                          return Column(
-                            children: [
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  onPressed: () =>
-                                      _updateOrderStatus(orderId, status),
-                                  icon: Icon(_getActionIcon(status)),
-                                  label: Text(_getActionText(status)),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF0D2B0D),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              if ((status == 'accepted' || status == 'in_progress')) ...[
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: () =>
-                                        _openChatForOrder(orderId, orderData),
-                                    icon: const Icon(Icons.chat),
-                                    label:
-                                        const Text('Chat about this order'),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor:
-                                          const Color(0xFF0D2B0D),
-                                      side: const BorderSide(
-                                          color: Color(0xFF0D2B0D)),
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          );
-                        }
-                      }),
-                    ],
-                  ),
-                ),
-              );
+              final order = orders[index];
+              if (order.sourceCollection == 'orders') {
+                return _buildOrderCard(order);
+              } else {
+                return _buildAddressCard(order);
+              }
             },
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildOrderCard(app_order.Order order) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(order.status),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    order.status.toUpperCase(),
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Text(
+                  DateFormat('MM/dd/yyyy').format(order.createdAt),
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text('Order ID: ${order.id}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 12),
+            const Text('PICKUP', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(
+              order.pickupAddress.fullAddress,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            if (order.pickupAddress.notes != null && order.pickupAddress.notes!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.note, size: 16, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      order.pickupAddress.notes!,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (order.status == 'assigned')
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _acceptOrder(order),
+                      icon: const Icon(Icons.check),
+                      label: const Text('Accept'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _denyOrder(order),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Deny'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else if (order.status == 'accepted' || order.status == 'in_progress')
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (order.dropOffAddresses.isNotEmpty) ...[
+                    const Divider(height: 24),
+                    const Text('DROP-OFFS', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    ...order.dropOffAddresses.map((address) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(address.fullAddress, style: const TextStyle(fontSize: 16)),
+                          if (address.notes != null && address.notes!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.note, size: 16, color: Colors.grey),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    address.notes!,
+                                    style: const TextStyle(color: Colors.grey, fontSize: 14),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ]
+                        ],
+                      ),
+                    )),
+                  ],
+                  if (order.notes != null && order.notes!.isNotEmpty) ...[
+                    const Divider(height: 24),
+                    const Text('GENERAL NOTES', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text(order.notes!, style: const TextStyle(fontSize: 16)),
+                  ],
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => _updateOrderStatus(order, order.status),
+                      child: Text(order.status == 'accepted' ? 'Start Delivery' : 'Mark as Completed'),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddressCard(app_order.Order order) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(order.status),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    order.status.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  DateFormat('MM/dd/yyyy').format(order.createdAt),
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              order.pickupAddress.fullAddress,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (order.notes != null && order.notes!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.note, size: 16, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      order.notes!,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (order.status.toLowerCase() == 'assigned')
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _acceptOrder(order),
+                      icon: const Icon(Icons.check),
+                      label: const Text('Accept'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _denyOrder(order),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Deny'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => _updateOrderStatus(order, order.status),
+                  child: Text(order.status == 'accepted' ? 'Start Delivery' : 'Mark as Completed'),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -279,94 +413,43 @@ class _DriverAssignedOrdersScreenState
     }
   }
 
-  IconData _getActionIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'assigned':
-      case 'accepted':
-        return Icons.play_arrow;
-      case 'in_progress':
-        return Icons.check;
-      case 'completed':
-        return Icons.done;
-      default:
-        return Icons.play_arrow;
-    }
-  }
-
-  String _getActionText(String status) {
-    switch (status.toLowerCase()) {
-      case 'assigned':
-      case 'accepted':
-        return 'Start Delivery';
-      case 'in_progress':
-        return 'Mark as Completed';
-      case 'completed':
-        return 'Completed';
-      default:
-        return 'Start Delivery';
-    }
-  }
-
-  String _formatDate(dynamic timestamp) {
-    if (timestamp == null) return 'Unknown date';
-
+  Future<void> _acceptOrder(app_order.Order order) async {
     try {
-      DateTime date;
-      if (timestamp is Timestamp) {
-        date = timestamp.toDate();
-      } else if (timestamp is String) {
-        date = DateTime.parse(timestamp);
-      } else {
-        return 'Invalid date';
-      }
-
-      return '${date.day}/${date.month}/${date.year}';
-    } catch (e) {
-      return 'Invalid date';
-    }
-  }
-
-  Future<void> _acceptOrder(String orderId) async {
-    try {
-      await _firestore.collection('addresses').doc(orderId).update({
+      await _firestore.collection(order.sourceCollection).doc(order.id).update({
         'status': 'accepted',
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error accepting order: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error accepting order: $e')));
     }
   }
 
-  Future<void> _denyOrder(String orderId) async {
+  Future<void> _denyOrder(app_order.Order order) async {
     try {
-      await _firestore.collection('addresses').doc(orderId).update({
-        'driverId': null,
-        'status': 'denied',
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error denying order: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      if (order.sourceCollection == 'orders') {
+        await _firestore.collection('orders').doc(order.id).update({
+          'driverIds': FieldValue.arrayRemove([_currentUser!.uid]),
+          'status': 'denied',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        await _firestore.collection('addresses').doc(order.id).update({
+          'driverId': null,
+          'status': 'denied',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error denying order: $e')));
     }
   }
 
-  Future<void> _updateOrderStatus(String orderId, String currentStatus) async {
+  Future<void> _updateOrderStatus(app_order.Order order, String currentStatus) async {
     try {
       String newStatus;
       switch (currentStatus.toLowerCase()) {
-        case 'assigned':
         case 'accepted':
           newStatus = 'in_progress';
           break;
@@ -374,139 +457,15 @@ class _DriverAssignedOrdersScreenState
           newStatus = 'completed';
           break;
         default:
-          return; // Already completed or invalid status
+          return;
       }
-
-      await _firestore.collection('addresses').doc(orderId).update({
+      await _firestore.collection(order.sourceCollection).doc(order.id).update({
         'status': newStatus,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content:
-                Text('Order status updated to ${newStatus.replaceAll('_', ' ')}'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating order: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _openChatForOrder(
-      String orderId, Map<String, dynamic> orderData) async {
-    if (_currentUser == null) return;
-
-    try {
-      // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-
-      // Get admin ID - try different possible field names
-      String? adminId = orderData['createdBy'] as String? ??
-          orderData['adminId'] as String? ??
-          orderData['userId'] as String?;
-
-      // If no adminId in order, try to get it from deliveries collection
-      if (adminId == null) {
-        try {
-          final deliveryDoc =
-              await _firestore.collection('deliveries').doc(orderId).get();
-          if (deliveryDoc.exists) {
-            final deliveryData = deliveryDoc.data();
-            adminId = deliveryData?['createdBy'] as String? ??
-                deliveryData?['adminId'] as String? ??
-                deliveryData?['userId'] as String?;
-          }
-        } catch (e) {
-          print('Error getting delivery data: $e');
-        }
-      }
-
-      if (adminId == null) {
-        Navigator.pop(context); // Close loading
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                  'Unable to find the order administrator. Please contact support.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
-
-      // Store in non-nullable variable after null check
-      final adminIdNonNull = adminId;
-
-      // Get admin user details
-      final adminDetails = await _chatService.getUserDetails(adminIdNonNull);
-      if (adminDetails == null) {
-        Navigator.pop(context); // Close loading
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Administrator not found'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      // Create or get conversation
-      final orderTitle =
-          '${orderData['streetAddress'] ?? ''}, ${orderData['city'] ?? ''}, ${orderData['state'] ?? ''} ${orderData['zipCode'] ?? ''}';
-      final conversationId = await _chatService.createOrGetConversation(
-        adminIdNonNull,
-        orderId: orderId,
-        orderTitle: orderTitle,
-      );
-
-      Navigator.pop(context); // Close loading
-
-      // Navigate to chat screen
-      if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ChatPage(
-              conversationId: conversationId,
-              otherUserId: adminIdNonNull,
-              otherUserName:
-                  adminDetails['name'] ?? adminDetails['email'] ?? 'Admin',
-              orderId: orderId,
-              orderTitle: orderTitle,
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      Navigator.pop(context); // Close loading if still open
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error opening chat: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating order: $e')));
     }
   }
 }

@@ -108,12 +108,13 @@ class GraphGoApp extends StatelessWidget {
 }
 
 final GoRouter _router = GoRouter(
+  initialLocation: '/', // Set the initial location to the home screen
   refreshListenable: _AuthStateNotifier(),
   redirect: (BuildContext context, GoRouterState state) {
     final user = FirebaseAuth.instance.currentUser;
     final isLoggedIn = user != null;
     final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
-    
+
     // If user is logged in and trying to access login/signup pages, redirect to home
     if (isLoggedIn && isLoggingIn) {
       return '/';
@@ -157,7 +158,7 @@ final GoRouter _router = GoRouter(
         ),
         GoRoute(
           path: '/route-history',
-          builder: (BuildContext context, GoRouterState state) {
+          builder: (BuildContext Aontext, GoRouterState state) {
             return const RouteHistoryScreen();
           },
         ),

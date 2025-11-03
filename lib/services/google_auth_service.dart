@@ -133,10 +133,10 @@ class GoogleAuthService {
     try {
       final user = _auth.currentUser;
       if (user != null) {
-        await _firestore.collection('users').doc(user.uid).update({
+        await _firestore.collection('users').doc(user.uid).set({
           'last_sign_in': Timestamp.now(),
           'role': 'Driver',
-        });
+        }, SetOptions(merge: true));
       }
     } catch (e) {
       print('Error updating last sign-in: $e');
