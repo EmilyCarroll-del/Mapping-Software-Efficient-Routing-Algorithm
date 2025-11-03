@@ -51,31 +51,31 @@ class _DriverAssignmentsScreenState extends State<DriverAssignmentsScreen> {
                       child: ListTile(
                         title: Text(address.fullAddress),
                         subtitle: Text('Status: $capitalizedStatus'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ElevatedButton(
-                              onPressed: () {
-                                _firestoreService.updateDeliveryStatus(address.id, 'accepted');
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.deepPurple,
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('Accept'),
+                        trailing: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 180), // keep it modest
+                          child: FittedBox( // shrinks content if still too wide
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // If you're using full ElevatedButtons with long text,
+                                // consider smaller TextButtons or IconButtons instead:
+                                TextButton(
+                                  onPressed: () {
+                                    _firestoreService.updateDeliveryStatus(address.id, 'accepted');
+                                  },
+                                  child: const Text('Accept'),
+                                ),
+                                const SizedBox(width: 8),
+                                TextButton(
+                                  onPressed: () {
+                                    _firestoreService.updateDeliveryStatus(address.id, 'denied');
+                                  },
+                                  child: const Text('Deny'),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              onPressed: () {
-                                _firestoreService.denyAssignment(address.id);
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.grey.shade700,
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('Deny'),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                     );

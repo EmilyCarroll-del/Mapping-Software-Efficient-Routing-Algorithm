@@ -82,3 +82,9 @@ coverage/
 
 # Exceptions to above rules.
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
+
+# credentials
+server/service-account.json
+*.secret.json
+*service-account*.json
+
