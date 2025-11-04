@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../services/user_profile_service.dart'; // ⬅️ seeds profile + FCM on first sign-in
+
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
 
@@ -19,8 +21,9 @@ class _SignupPageState extends State<SignupPage> {
     if (value == null || value.isEmpty) {
       return "Email is required.";
     }
-    final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}\$');
-    if (!emailRegex.hasMatch(value)) {
+    // Raw string (no double escaping)
+    final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+    if (!emailRegex.hasMatch(value.trim())) {
       return "Please enter a valid email address.";
     }
     return null;
@@ -30,8 +33,8 @@ class _SignupPageState extends State<SignupPage> {
     if (value == null || value.isEmpty) return "Password is required.";
     if (value.length < 12) return "Password must be at least 12 characters.";
     if (!RegExp(r'[A-Z]').hasMatch(value)) return "Must contain 1 uppercase letter.";
-    if (!RegExp(r'\\d').hasMatch(value)) return "Must contain 1 number.";
-    if (!RegExp(r'[!@#\\\$%^&*(),.?":{}|<>]').hasMatch(value)) return "Must contain 1 special character.";
+    if (!RegExp(r'\d').hasMatch(value)) return "Must contain 1 number.";
+    if (!RegExp(r'[!@#\$%^&*(),.?":{}|<>]').hasMatch(value)) return "Must contain 1 special character.";
     return null;
   }
 
@@ -41,38 +44,45 @@ class _SignupPageState extends State<SignupPage> {
     setState(() => _isLoading = true);
 
     try {
-      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      // 1) Create auth user
+      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-        'email': _emailController.text.trim(),
-        'provider': 'email',
-        'created_at': Timestamp.now(),
-      });
+      // 2) Seed/merge full profile + FCM token (PART A server-side mirror is your local notifier)
+      await UserProfileService.upsertCurrentUserProfile();
 
-      if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/map');
-      }
+      // 3) Persist defaults that your app expects (role, provider, createdAt)
+      //    This merges into the seeded profile so nothing is lost.
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(cred.user!.uid)
+          .set({
+        'role': 'Driver',                 // <-- change if you want a different default
+        'provider': 'password',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (!mounted) return;
+      // 4) Route new users (Driver default goes to map)
+      Navigator.of(context).pushReplacementNamed('/map');
     } on FirebaseAuthException catch (e) {
-      String errorMessage;
-      if (e.code == 'email-already-in-use') {
-        errorMessage = "This email is already registered. Please log in or use a different email.";
-      } else {
-        errorMessage = "Signup Failed: \${e.message}";
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage)),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("An unexpected error occurred: \${e.toString()}")),
-      );
-    } finally {
+      final msg = (e.code == 'email-already-in-use')
+          ? "This email is already registered. Please log in or use a different email."
+          : "Signup Failed: ${e.message}";
       if (mounted) {
-        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("An unexpected error occurred: ${e.toString()}")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -113,10 +123,11 @@ class _SignupPageState extends State<SignupPage> {
                       labelText: 'Password',
                       border: const OutlineInputBorder(),
                       suffixIcon: Tooltip(
-                        message: 'Password must be at least 12 characters long and include:\\n'
-                            '- 1 uppercase letter\\n'
-                            '- 1 number\\n'
-                            '- 1 special character (!@#\\\$%^&*(),.?":{}|<>)',
+                        message:
+                        'Password must be at least 12 characters long and include:\n'
+                            '- 1 uppercase letter\n'
+                            '- 1 number\n'
+                            '- 1 special character (!@#\$%^&*(),.?":{}|<>)',
                         child: const Icon(Icons.help_outline),
                       ),
                     ),
@@ -127,16 +138,18 @@ class _SignupPageState extends State<SignupPage> {
                   _isLoading
                       ? const CircularProgressIndicator()
                       : SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: _signUp,
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 20),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: const Text('Create Account'),
-                          ),
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _signUp,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
+                      ),
+                      child: const Text('Create Account'),
+                    ),
+                  ),
                 ],
               ),
             ),

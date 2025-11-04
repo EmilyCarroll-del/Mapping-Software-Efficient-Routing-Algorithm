@@ -1,103 +1,135 @@
-// functions/index.js
 /* eslint-disable */
-// 1) import the v2 Firestore trigger
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { logger } = require("firebase-functions");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onUserCreated } = require("firebase-functions/v2/identity");
 
-// 2) firebase-admin (to read Firestore + send FCM)
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 
-// init admin SDK once
 initializeApp();
 const db = getFirestore();
 
 /**
- * Trigger: whenever a new message doc is created at
- * chats/{chatId}/messages/{messageId}
- *
- * We will:
- * 1. read the parent chat (to know who is in this chat)
- * 2. figure out who the sender was
- * 3. for every *other* user in that chat, read their user doc
- * 4. grab their fcmToken
- * 5. send them a notification
+ * PART A(1): Seed a full user profile on first account creation.
+ * Writes to users/{uid}. Uses a structure that matches the shape you want.
+ */
+exports.seedUserProfileOnCreate = onUserCreated(async (event) => {
+  const user = event.data;
+  if (!user) return;
+
+  const { uid, email, displayName, phoneNumber, providerData } = user;
+  const provider = Array.isArray(providerData) && providerData.length
+    ? providerData[0].providerId
+    : "password";
+
+  const now = new Date();
+
+  const payload = {
+    bio: "",
+    company: "GraphGo ",
+    companyCode: "",                   // optional – fill from app if you use codes
+    createdAt: now,
+    email: email || "",
+    fcmToken: "",
+    fcmTokenUpdatedAt: null,
+    firstName: "",
+    lastName: "",
+    lastSignIn: now,
+    last_sign_in: now,
+    name: displayName || email || "Unknown User",
+    phone: phoneNumber || "",
+    profileImageUrl: "",
+    provider: provider,
+    role: "Driver",                    // you can change later to "Admin" in app/console
+    updatedAt: now,
+  };
+
+  await db.collection("users").doc(uid).set(payload, { merge: true });
+  logger.info(`Seeded user profile for uid=${uid}`);
+});
+
+
+/**
+ * PART B: Send chat notifications only to recipients (not the sender).
+ * Trigger: chats/{chatId}/messages/{messageId}
+ * Requires parent chat doc to have: { users: [uid1, uid2] }
+ * Each user doc must have: { fcmToken }
  */
 exports.sendChatNotification = onDocumentCreated(
-    "chats/{chatId}/messages/{messageId}",
-    async (event) => {
-        // the message that was just written
-        const snap = event.data;
-        if (!snap) {
-            logger.warn("No snapshot data on event");
-            return;
-        }
+  "chats/{chatId}/messages/{messageId}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
 
-        const messageData = snap.data() || {};
-        const chatId = event.params.chatId;
+    const messageData = snap.data() || {};
+    const { chatId } = event.params;
 
-        const senderId = messageData.senderId || "";
-        const text = (messageData.message || "").toString();
+    const senderId = messageData.senderId || "";
+    const text = (messageData.message || "").toString();
 
-        // 1. get the parent chat
-        const chatRef = db.collection("chats").doc(chatId);
-        const chatDoc = await chatRef.get();
-        if (!chatDoc.exists) {
-            logger.warn(`Chat ${chatId} not found — aborting notification`);
-            return;
-        }
+    // 1) Load chat doc to get the participants
+    const chatRef = db.collection("chats").doc(chatId);
+    const chatDoc = await chatRef.get();
+    if (!chatDoc.exists) {
+      logger.warn(`Chat ${chatId} not found — aborting notification`);
+      return;
+    }
+    const chat = chatDoc.data() || {};
+    const users = Array.isArray(chat.users) ? chat.users : [];
+    const recipientIds = users.filter((u) => u !== senderId);
 
-        const chat = chatDoc.data() || {};
-        const users = Array.isArray(chat.users) ? chat.users : [];
-        if (users.length === 0) {
-            logger.info(`Chat ${chatId} has no users array — nothing to notify`);
-            return;
-        }
+    if (recipientIds.length === 0) {
+      logger.info(`No recipients for chat ${chatId}`);
+      return;
+    }
 
-        // 2. find recipients (everyone except sender)
-        const recipientIds = users.filter((uid) => uid !== senderId);
+    // 2) Try to show sender's name in the notification title
+    let senderName = "New message";
+    try {
+      const senderDoc = await db.collection("users").doc(senderId).get();
+      if (senderDoc.exists) {
+        const d = senderDoc.data() || {};
+        senderName = d.name || d.email || senderName;
+      }
+    } catch (_) {}
 
-        if (recipientIds.length === 0) {
-            logger.info("No recipients (maybe sender was the only one)");
-            return;
-        }
+    // 3) Collect recipient tokens
+    const userDocs = await Promise.all(
+      recipientIds.map((uid) => db.collection("users").doc(uid).get())
+    );
 
-        // 3. load each recipient's user doc to get their FCM token
-        const userDocs = await Promise.all(
-            recipientIds.map((uid) => db.collection("users").doc(uid).get()),
-        );
+    const tokens = userDocs
+      .map((doc) => (doc.exists ? doc.data().fcmToken : null))
+      .filter((t) => typeof t === "string" && t.length > 0);
 
-        const tokens = userDocs
-            .map((doc) => (doc.exists ? doc.data().fcmToken : null))
-            .filter((t) => typeof t === "string" && t.length > 0);
+    if (tokens.length === 0) {
+      logger.info(`Recipients have no fcmToken — nothing to send`);
+      return;
+    }
 
-        if (tokens.length === 0) {
-            logger.info("Recipients have no fcmToken — nothing to send");
-            return;
-        }
+    const body = text.length > 100 ? text.slice(0, 100) + "…" : (text || "New message");
 
-        // 4. build the notification
-        const body =
-      text.length > 80 ? text.substring(0, 80) + "…" : text || "New message";
+    // 4) Build the notification
+    // For web: we pass a link with the chatId as a query param so the app can open the right chat.
+    const msg = {
+      tokens,
+      notification: { title: senderName, body },
+      data: {
+        type: "chat_message",
+        chatId,
+        senderId,
+      },
+      webpush: {
+        fcmOptions: {
+          // This will open your PWA to "/" and include ?openChat={chatId}
+          link: `/#/?openChat=${encodeURIComponent(chatId)}`,
+        },
+      },
+    };
 
-        const multicast = {
-            tokens,
-            notification: {
-                title: "New chat message",
-                body,
-            },
-            data: {
-                type: "CHAT_MESSAGE",
-                chatId,
-                senderId,
-            },
-        };
-
-        // 5. send to FCM
-        const res = await getMessaging().sendEachForMulticast(multicast);
-        logger.info(
-            `✅ sentChatNotification → ${res.successCount} sent, ${res.failureCount} failed`,
-        );
-    },
+    // 5) Send
+    const res = await getMessaging().sendEachForMulticast(msg);
+    logger.info(`✅ sendChatNotification → ${res.successCount} sent, ${res.failureCount} failed`);
+  }
 );

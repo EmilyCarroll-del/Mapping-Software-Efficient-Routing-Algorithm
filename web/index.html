@@ -38,19 +38,14 @@
 
 <!-- register our FCM service worker -->
 <script>
+  // Register ASAP so we don't hit the 10s timeout window
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-      // ⚠️ use *relative* path for Flutter dev server
-      navigator.serviceWorker.register('firebase-messaging-sw.js')
-        .then(function (registration) {
-          console.log('SW registered: ', registration);
-        })
-        .catch(function (err) {
-          console.log('SW registration failed: ', err);
-        });
-    });
+    navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.log('SW registration failed:', err));
   }
 </script>
+
 </body>
 </html>
 
