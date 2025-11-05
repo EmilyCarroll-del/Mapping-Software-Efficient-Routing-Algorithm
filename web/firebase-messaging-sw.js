@@ -1,5 +1,6 @@
-importScripts("https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/11.0.1/firebase-messaging-compat.js");
+// web/firebase-messaging-sw.js
+importScripts('https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/11.0.1/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: "AIzaSyByWSG8ewS_QX2jLfsmO5YsnbKE7HH8HRE",
@@ -12,35 +13,28 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// Show notification for data-only messages
 messaging.onBackgroundMessage((payload) => {
-  const data = payload?.data || {};
-  const title = (payload?.notification && payload.notification.title) || data.title || "GraphGo";
-  const body  = (payload?.notification && payload.notification.body)  || data.body  || "New message";
-
+  const data = payload.data || {};
+  const title = data.title || 'GraphGo';
+  const body = data.body || 'You have a new message';
   self.registration.showNotification(title, {
     body,
-    icon: "/icons/Icon-192.png",
-    data, // keep chatId, type, etc.
+    icon: '/icons/Icon-192.png',
+    data,
   });
 });
 
-// Open/focus the app on the chat screen
-self.addEventListener("notificationclick", (event) => {
-  const data = event.notification?.data || {};
+// Handle clicks → focus an open tab or open a new one
+self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-
-  const url = `/?openChat=${encodeURIComponent(data.chatId || "")}`;
-  event.waitUntil((async () => {
-    const allClients = await clients.matchAll({ type: "window", includeUncontrolled: true });
-    // Try to focus an existing tab
-    for (const client of allClients) {
-      const u = new URL(client.url);
-      if (u.origin === self.location.origin) {
-        client.postMessage({ type: "OPEN_CHAT", chatId: data.chatId || "" });
-        return client.focus();
+  const url = self.location.origin + '/#/map'; // open app
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) return client.focus();
       }
-    }
-    // Or open a new one
-    return clients.openWindow(url);
-  })());
+      if (clients.openWindow) return clients.openWindow(url);
+    })
+  );
 });

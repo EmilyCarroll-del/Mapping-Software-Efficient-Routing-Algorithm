@@ -1,53 +1,40 @@
-import 'package:flutter/foundation.dart';
+// lib/screens/login.dart
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../providers/settings_provider.dart';
+// settings button on app bar needs this route to exist (you already have it)
+import '../providers/settings_provider.dart'; // (kept because you had it imported)
+// Google sign-in helper (your existing file)
 import '../services/google_auth_service.dart';
-import '../services/user_profile_service.dart'; // <-- NEW: seeds profile + FCM on sign-in
+
+// >>> NEW: profile + FCM updater <<<
+import '../services/user_profile_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
   @override
-  _LoginPageState createState() => _LoginPageState();
+  State<LoginPage> createState() => _LoginPageState();
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+
   bool _isLoading = false;
 
-  /// UI role toggle (you already had this)
-  String _selectedRole = 'Admin'; // Default role
+  /// Let the user pick the UI they want to enter after login.
+  /// (We still *persist* the chosen role if the user doc has none.)
+  String _selectedRole = 'Admin';
 
-  /// After any successful sign-in, we:
-  /// 1) upsert the user profile + FCM token
-  /// 2) persist the role selection to the user doc (merge)
-  /// 3) navigate
-  Future<void> _postLoginHousekeepingAndNavigate() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    // 1) Seed/merge the full profile + FCM token
-    await UserProfileService.upsertCurrentUserProfile();
-
-    // 2) Persist role that was chosen on the login screen
-    try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set({'role': _selectedRole}, SetOptions(merge: true));
-    } catch (_) {
-      // Non-fatal if this fails; navigation can continue
-    }
-
-    // 3) Navigate based on the role picker (your existing logic)
-    _navigateBasedOnRole(_selectedRole);
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
   }
 
   void _navigateBasedOnRole(String role) {
@@ -63,28 +50,36 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isLoading = true);
+  Future<void> _afterAuthSuccess({required String inferredRole}) async {
+    // Merge profile + save FCM token (web+mobile) + write lastSignIn.
+    await UserProfileService.updateOnSignIn(
+      context,
+      inferredRole: inferredRole, // only used if user doc has no role yet
+    );
 
+    // Navigate based on the current picker
+    _navigateBasedOnRole(inferredRole);
+  }
+
+  Future<void> _loginEmailPassword() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+        email: _email.text.trim(),
+        password: _password.text.trim(),
       );
 
-      // NEW: seed/merge profile + save role + navigate
-      await _postLoginHousekeepingAndNavigate();
+      await _afterAuthSuccess(inferredRole: _selectedRole);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: ${e.message}")),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Login failed: ${e.message}')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: ${e.toString()}")),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Login failed: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -92,38 +87,44 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _loginWithGoogle() async {
     setState(() => _isLoading = true);
-
     try {
-      final UserCredential? userCredential =
-      await GoogleAuthService.signInWithGoogle();
+      final cred = await GoogleAuthService.signInWithGoogle();
+      if (cred?.user == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Google Sign-In cancelled')),
+          );
+        }
+        return;
+      }
 
-      if (FirebaseAuth.instance.currentUser != null) {
-        // NEW: seed/merge profile + save role + navigate
-        await _postLoginHousekeepingAndNavigate();
-      } else if (userCredential == null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Google Sign-In was cancelled or failed.")),
-        );
-      }
+      await _afterAuthSuccess(inferredRole: _selectedRole);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Google Login Failed: ${e.toString()}")),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Google Login failed: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  String? _validateEmail(String? v) {
+    if (v == null || v.trim().isEmpty) return 'Enter your email';
+    final re = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    if (!re.hasMatch(v.trim())) return 'Enter a valid email';
+    return null;
+  }
+
+  String? _validatePassword(String? v) {
+    if (v == null || v.isEmpty) return 'Enter your password';
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final ThemeData currentTheme = Theme.of(context);
-    final bool darkMode = currentTheme.brightness == Brightness.dark;
-    final Color welcomeTextColor = darkMode ? Colors.white : Colors.black87;
-    final Color sloganTextColor = darkMode ? Colors.grey[300]! : Colors.black54;
-    final Color iconColor = darkMode ? Colors.white : const Color(0xFF0D2B0D);
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final iconColor = dark ? Colors.white : const Color(0xFF0D2B0D);
 
     return Scaffold(
       appBar: AppBar(
@@ -131,155 +132,136 @@ class _LoginPageState extends State<LoginPage> {
           icon: const Icon(Icons.settings, color: Colors.white),
           onPressed: () => Navigator.of(context).pushNamed('/settings'),
         ),
-        title: const Text('GraphGo',
-            style:
-            TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        title: const Text(
+          'GraphGo',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+        ),
         centerTitle: true,
       ),
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              Icon(
-                Icons.account_tree,
-                size: 100,
-                color: iconColor,
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'Welcome to GraphGo',
-                style: currentTheme.textTheme.headlineMedium?.copyWith(
-                  fontSize:
-                  (currentTheme.textTheme.headlineMedium?.fontSize ??
-                      28) *
-                      1.15,
-                  fontWeight: FontWeight.bold,
-                  color: welcomeTextColor,
+          padding: const EdgeInsets.all(32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.account_tree, size: 96, color: iconColor),
+                const SizedBox(height: 20),
+                Text(
+                  'Welcome to GraphGo',
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Log in as Admin or Driver to start exploring',
-                style: currentTheme.textTheme.bodyLarge?.copyWith(
-                  fontSize: 16,
-                  color: sloganTextColor,
+                const SizedBox(height: 10),
+                Text(
+                  'Log in as Admin or Driver to start',
+                  style: theme.textTheme.bodyLarge,
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 50),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 400),
-                child: Column(
+                const SizedBox(height: 36),
+
+                // ---- Google Sign-In ----
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isLoading ? null : _loginWithGoogle,
+                    icon: SvgPicture.asset(
+                      'assets/icons/google_icon.svg',
+                      width: 20,
+                      height: 20,
+                    ),
+                    label: const Text('Sign in with Google'),
+                  ),
+                ),
+
+                const SizedBox(height: 18),
+                const Row(
                   children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _isLoading ? null : _loginWithGoogle,
-                        icon: SvgPicture.asset('assets/icons/google_icon.svg',
-                            width: 20, height: 20),
-                        label: const Text('Sign in with Google'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
+                    Expanded(child: Divider()),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('OR'),
                     ),
-                    const SizedBox(height: 20),
-                    const Row(
-                      children: [
-                        Expanded(child: Divider()),
-                        Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 16),
-                          child: Text('OR'),
-                        ),
-                        Expanded(child: Divider()),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Form(
-                      key: _formKey,
-                      child: Column(
-                        children: [
-                          DropdownButtonFormField<String>(
-                            value: _selectedRole,
-                            decoration: const InputDecoration(
-                              labelText: 'Role',
-                              border: OutlineInputBorder(),
-                            ),
-                            items: ['Admin', 'Driver']
-                                .map<DropdownMenuItem<String>>(
-                                    (String value) => DropdownMenuItem<String>(
-                                  value: value,
-                                  child: Text(value),
-                                ))
-                                .toList(),
-                            onChanged: (String? newValue) {
-                              if (newValue != null) {
-                                setState(() => _selectedRole = newValue);
-                              }
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _emailController,
-                            decoration: const InputDecoration(
-                                labelText: 'Email',
-                                border: OutlineInputBorder()),
-                            keyboardType: TextInputType.emailAddress,
-                            validator: (value) =>
-                            value!.isEmpty ? "Enter your email" : null,
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _passwordController,
-                            decoration: const InputDecoration(
-                                labelText: 'Password',
-                                border: OutlineInputBorder()),
-                            obscureText: true,
-                            validator: (value) =>
-                            value!.isEmpty ? "Enter your password" : null,
-                          ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: () {
-                                Navigator.of(context).pushNamed('/forgot');
-                              },
-                              child: const Text('Forgot Password?'),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          _isLoading
-                              ? const CircularProgressIndicator()
-                              : SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _login,
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 20),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                    BorderRadius.circular(8)),
-                              ),
-                              child: const Text('Login with Email'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pushNamed('/signup');
-                      },
-                      child: const Text("Don't have an account? Sign Up"),
-                    ),
+                    Expanded(child: Divider()),
                   ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 18),
+
+                // ---- Email / Password ----
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      DropdownButtonFormField<String>(
+                        value: _selectedRole,
+                        decoration: const InputDecoration(
+                          labelText: 'Role',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Admin', child: Text('Admin')),
+                          DropdownMenuItem(value: 'Driver', child: Text('Driver')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedRole = v);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _email,
+                        validator: _validateEmail,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _password,
+                        validator: _validatePassword,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () => Navigator.of(context).pushNamed('/forgot'),
+                          child: const Text('Forgot Password?'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _isLoading
+                          ? const CircularProgressIndicator()
+                          : SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _loginEmailPassword,
+                          style: ElevatedButton.styleFrom(
+                            padding:
+                            const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text('Login with Email'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pushNamed('/signup'),
+                  child: const Text("Don't have an account? Sign Up"),
+                ),
+              ],
+            ),
           ),
         ),
       ),
