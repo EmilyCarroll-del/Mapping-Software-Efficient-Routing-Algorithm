@@ -13,28 +13,39 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Show notification for data-only messages
+// Background: show a toast for data-only messages
 messaging.onBackgroundMessage((payload) => {
-  const data = payload.data || {};
-  const title = data.title || 'GraphGo';
-  const body = data.body || 'You have a new message';
+  const d = payload.data || {};
+  const title = d.title || 'GraphGo';
+  const body  = d.body  || 'You have a new message';
+  const chatId = d.chatId || '';
+
   self.registration.showNotification(title, {
     body,
     icon: '/icons/Icon-192.png',
-    data,
+    badge: '/icons/Icon-192.png',
+    data: { chatId },
   });
 });
 
-// Handle clicks → focus an open tab or open a new one
+// Clicking the toast → focus an open tab or open a new one
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = self.location.origin + '/#/map'; // open app
+  const chatId = event.notification?.data?.chatId || '';
+  const url = chatId
+    ? `${self.location.origin}/#/map?chatId=${chatId}`
+    : `${self.location.origin}/#/map`;
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if ('focus' in client) return client.focus();
+        if ('focus' in client) {
+          // Optionally tell the page which chat to open
+          client.postMessage({ type: 'OPEN_CHAT', chatId });
+          return client.focus();
+        }
       }
-      if (clients.openWindow) return clients.openWindow(url);
+      return clients.openWindow(url);
     })
   );
 });
