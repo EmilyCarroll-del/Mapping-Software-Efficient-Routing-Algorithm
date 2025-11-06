@@ -119,24 +119,33 @@ class _AddressListState extends State<AddressList> {
                       subtitle: Text('Status: $capitalizedStatus'),
                       trailing: widget.isReadOnly
                           ? null
-                          : Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (address.status == 'denied')
-                                  TextButton(
-                                    onPressed: () => widget.onReassign(address.id),
-                                    child: const Text('Reassign', style: TextStyle(color: Colors.orange)),
+                          : ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 200),
+                        child: FittedBox( // shrinks if still tight
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (address.status == 'denied')
+                                TextButton(
+                                  onPressed: () => widget.onReassign(address.id),
+                                  child: const Text(
+                                    'Reassign',
+                                    style: TextStyle(color: Colors.orange),
                                   ),
-                                IconButton(
-                                  icon: const Icon(Icons.edit, color: Colors.blue),
-                                  onPressed: () => widget.onEdit(address),
                                 ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.red),
-                                  onPressed: () => widget.onDelete(address.id),
-                                ),
-                              ],
-                            ),
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () => widget.onEdit(address),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () => widget.onDelete(address.id),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   );
                 },

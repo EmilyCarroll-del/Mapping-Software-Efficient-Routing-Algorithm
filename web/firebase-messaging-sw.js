@@ -6,7 +6,7 @@ importScripts('https://www.gstatic.com/firebasejs/11.0.0/firebase-messaging-comp
 // IMPORTANT: paste your web app's Firebase config here
 firebase.initializeApp({
   apiKey: "AIzaSyByWSG8ewS_QX2jLfsmO5YsnbKE7HH8HRE",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  authDomain: "graph-go-bd4f0.firebaseapp.com",
   projectId: "graph-go-bd4f0",
   messagingSenderId: "627645762372",
   appId: "1:627645762372:web:951f0e05232e1b23f2a511"
@@ -31,3 +31,4 @@ self.addEventListener('notificationclick', (event) => {
   const url = event.notification?.data?.url || '/';
   event.waitUntil(clients.openWindow(url));
 });
+

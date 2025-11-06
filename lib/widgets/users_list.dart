@@ -49,10 +49,16 @@ class UsersList extends StatelessWidget {
                 title: Text(displayTitle),
                 subtitle: Text('Role: $capitalizedRole'),
                 trailing: user.role != 'driver'
-                    ? ElevatedButton(
-                        onPressed: () => onAssignDriver(user.uid),
-                        child: const Text('Make Driver'),
-                      )
+                    ? ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: TextButton(
+                      onPressed: () => onAssignDriver(user.uid),
+                      child: const Text('Make Driver'),
+                    ),
+                  ),
+                )
                     : null,
               ),
             );

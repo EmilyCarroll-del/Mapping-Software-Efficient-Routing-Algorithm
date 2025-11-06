@@ -19,10 +19,10 @@ dependencies:
   shared_preferences: ^2.2.3
 
   # ✅ Firebase + Auth + Firestore + Storage
-  firebase_core:
-  firebase_auth:
-  cloud_firestore:
-  firebase_storage:
+  firebase_core: ^2.32.0
+  firebase_auth: ^4.20.0
+  cloud_firestore: ^4.17.5
+  firebase_storage: ^11.7.7
 
   # ✅ Maps + Location
   google_maps_flutter: ^2.6.1
@@ -33,12 +33,12 @@ dependencies:
   google_sign_in: ^6.2.1
 
   # ✅ Extras
-  http: ^1.1.0
+  http: ^1.2.1
   uuid: ^4.2.1
   image_picker: ^1.0.4
   file_picker: ^6.2.0
   csv: ^6.0.0
-  firebase_messaging: ^16.0.3
+  firebase_messaging: ^14.9.3
 
 dev_dependencies:
   flutter_test:

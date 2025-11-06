@@ -35,6 +35,10 @@
   <link rel="manifest" href="manifest.json">
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74"></script>
 
+  <!-- ADD: Firebase Messaging SDK -->
+  <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-messaging.js"></script>
+
+
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-auth.js"></script>
@@ -44,20 +48,54 @@
 
 </head>
 <body>
-  <script>
-    // Your web app's Firebase configuration
-    var firebaseConfig = {
-      apiKey: "AIzaSyByWSG8ewS_QX2jLfsmO5YsnbKE7HH8HRE",
-      authDomain: "graph-go-bd4f0.firebaseapp.com",
-      projectId: "graph-go-bd4f0",
-      storageBucket: "graph-go-bd4f0.firebasestorage.app",
-      messagingSenderId: "627645762372",
-      appId: "1:627645762372:web:45d648b5ef756be6f2a511",
-      measurementId: "G-DW8MH83H28"
-    };
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-  </script>
-  <script src="flutter_bootstrap.js" async></script>
+<script>
+  // Your web app's Firebase configuration
+  var firebaseConfig = {
+    apiKey: "AIzaSyByWSG8ewS_QX2jLfsmO5YsnbKE7HH8HRE",
+    authDomain: "graph-go-bd4f0.firebaseapp.com",
+    projectId: "graph-go-bd4f0",
+    storageBucket: "graph-go-bd4f0.firebasestorage.app",
+    messagingSenderId: "627645762372",
+    appId: "1:627645762372:web:45d648b5ef756be6f2a511",
+    measurementId: "G-DW8MH83H28"
+  };
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+</script>
+
+<!-- ADD: Register service worker and get FCM token -->
+<script>
+  (async function () {
+    try {
+      // 1️⃣ Register the service worker (must be at site root)
+      const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' });
+      console.log('✅ Service Worker registered:', reg.scope);
+
+      // 2️⃣ Get the FCM token using v8 Firebase syntax
+      const messaging = firebase.messaging();
+      const vapidKey = 'BAEXeAwTaHrsEDu5-we5yu9YAnnOaEvKqF8s_dM_J2WJbp-9T2YoL54DRa2T61LBSjbHgBSNU3Xh2KmPvoS1ILs';
+
+      const token = await messaging.getToken({
+        vapidKey: vapidKey,
+        serviceWorkerRegistration: reg
+      });
+
+      console.log('✅ FCM Token (Web):', token);
+
+      // 3️⃣ Send this token to your Flask backend to register it
+      const resp = await fetch('http://127.0.0.1:5000/api/register-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driverId: 'driver_12', token })
+      });
+
+      console.log('Token registration response:', resp.status);
+    } catch (error) {
+      console.error('⚠️ FCM setup failed:', error);
+    }
+  })();
+</script>
+
+<script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
