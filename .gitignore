@@ -86,3 +86,4 @@ coverage/
 
 # Ignore Firebase Admin credentials
 server/serviceAccount.json
+server/serviceAccount.json
