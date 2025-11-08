@@ -1,7 +1,8 @@
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
+import '../services/notification_service.dart'; // <-- added
 
 class ChatPage extends StatefulWidget {
   final String chatId;
@@ -34,9 +35,10 @@ class _ChatPageState extends State<ChatPage> {
     if (currentUser == null) return; // Should not happen if they are on this screen
 
     final messageText = _messageController.text.trim();
+    final db = FirebaseFirestore.instance;
 
-    // Add the message to the 'messages' subcollection
-    await FirebaseFirestore.instance
+    // 1) add the message
+    final msgRef = await db
         .collection('chats')
         .doc(widget.chatId)
         .collection('messages')
@@ -46,17 +48,39 @@ class _ChatPageState extends State<ChatPage> {
       'timestamp': FieldValue.serverTimestamp(),
     });
 
-    // Update the parent chat document with the last message details
-    await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).update({
+    // 2) update parent chat summary
+    await db.collection('chats').doc(widget.chatId).update({
       'lastMessage': messageText,
       'lastMessageTime': FieldValue.serverTimestamp(),
     });
+
+    // 3) figure out the recipient (other participant)
+    final chatSnap = await db.collection('chats').doc(widget.chatId).get();
+    final chatData = chatSnap.data() as Map<String, dynamic>? ?? {};
+    final users = List<String>.from(chatData['users'] ?? const []);
+    final recipientId = users.firstWhere(
+          (u) => u != currentUser!.uid,
+      orElse: () => '',
+    );
+
+    // 4) create the recipient's in-app notification so MOBILE sees it
+    if (recipientId.isNotEmpty) {
+      await NotificationService.instance.createChatNotificationForRecipient(
+        recipientUserId: recipientId,
+        conversationId: widget.chatId,         // we’ll flag this as old format
+        senderUserId: currentUser!.uid,
+        senderName: currentUser!.email ?? 'Admin',
+        messageId: msgRef.id,
+        messageText: messageText,
+        messageType: 'text',
+        isOldFormat: true,                      // <-- IMPORTANT: chat uses old 'chats' collection
+      );
+    }
 
     _messageController.clear();
     _scrollToBottom();
   }
 
-  // Scrolls to the bottom of the message list
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -77,7 +101,6 @@ class _ChatPageState extends State<ChatPage> {
       ),
       body: Column(
         children: [
-          // StreamBuilder to display the chat messages
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -95,7 +118,7 @@ class _ChatPageState extends State<ChatPage> {
                 }
 
                 final messages = snapshot.data!.docs;
-                _scrollToBottom(); // Scroll to bottom when new messages arrive
+                _scrollToBottom();
 
                 return ListView.builder(
                   controller: _scrollController,
@@ -112,14 +135,12 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
           ),
-          // The input area for typing messages
           _buildMessageInputArea(),
         ],
       ),
     );
   }
 
-  // Builds the visual bubble for a single message
   Widget _buildMessageBubble(String text, bool isMe) {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -127,7 +148,9 @@ class _ChatPageState extends State<ChatPage> {
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
         decoration: BoxDecoration(
-          color: isMe ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.secondary.withOpacity(0.2),
+          color: isMe
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.secondary.withOpacity(0.2),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
@@ -140,7 +163,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  // Builds the text input field and send button
   Widget _buildMessageInputArea() {
     return Container(
       padding: const EdgeInsets.all(8.0),

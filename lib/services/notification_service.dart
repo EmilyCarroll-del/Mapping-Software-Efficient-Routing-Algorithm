@@ -9,32 +9,25 @@ class NotificationService {
 
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
-  // to avoid attaching the same listeners twice (driver + admin in same tab)
   bool _listenersAttached = false;
 
-  /// DRIVER side
-  /// call right after driver signs in / opens driver map screen
   Future<void> initForDriver(String driverId) async {
     await _initCommon(userId: driverId, role: 'driver');
   }
 
-  /// ADMIN side
-  /// call right after admin logs in / opens dashboard
   Future<void> initForAdmin(String adminId) async {
     await _initCommon(userId: adminId, role: 'admin');
   }
 
-  /// shared logic for any role
   Future<void> _initCommon({
     required String userId,
     required String role,
   }) async {
-    // 1. ask for permission
     await _requestPermission();
 
-    // 2. get FCM token (web needs vapidKey)
     final token = await _messaging.getToken(
-      vapidKey: "BAEXeAwTaHrsEDu5-we5yu9YAnnOaEvKqF8s_dM_J2WJbp-9T2YoL54DRa2T61LBSjbHgBSNU3Xh2KmPvoS1ILs",
+      vapidKey:
+      "BAEXeAwTaHrsEDu5-we5yu9YAnnOaEvKqF8s_dM_J2WJbp-9T2YoL54DRa2T61LBSjbHgBSNU3Xh2KmPvoS1ILs",
     );
 
     if (token == null) {
@@ -44,14 +37,12 @@ class NotificationService {
 
     debugPrint("✅ $role FCM token: $token");
 
-    // 3. save in Firestore so Cloud Function can find it
     await _saveTokenToFirestore(
       userId: userId,
       role: role,
       token: token,
     );
 
-    // 4. attach listeners (but only once)
     if (!_listenersAttached) {
       _attachForegroundListeners();
       _listenersAttached = true;
@@ -59,7 +50,6 @@ class NotificationService {
   }
 
   void _attachForegroundListeners() {
-    // when app is OPEN
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final data = message.data;
       final type = data['type'];
@@ -68,17 +58,14 @@ class NotificationService {
         final from = data['from'] ?? 'Admin';
         final body = data['body'] ?? '';
         debugPrint("📩 message from $from: $body");
-        // later: show snackbar / refresh inbox
       } else {
         debugPrint("📩 foreground message (no type): ${message.data}");
       }
     });
 
-    // when user CLICKS notification
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       final data = message.data;
       if (data['type'] == 'ADMIN_MESSAGE') {
-        // TODO: navigate to InboxPage
         debugPrint("➡️ user opened ADMIN_MESSAGE notification");
       }
     });
@@ -98,15 +85,61 @@ class NotificationService {
     required String role,
     required String token,
   }) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(userId)
-        .set({
+    await FirebaseFirestore.instance.collection('users').doc(userId).set({
       'role': role,
       'fcmToken': token,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
     debugPrint("✅ FCM token saved in Firestore for $userId ($role)");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Create an in-app notification doc for the RECIPIENT after writing a message
+  // ---------------------------------------------------------------------------
+  Future<void> createChatNotificationForRecipient({
+    required String recipientUserId,   // driver (or other admin)
+    required String conversationId,    // chat id
+    required String senderUserId,      // current admin uid
+    required String senderName,        // display name shown in title
+    required String messageId,         // the message doc id just created
+    required String messageText,       // text (or caption)
+    String messageType = 'text',       // 'text' | 'image'
+    bool isOldFormat = false,          // <-- mark true for 'chats' collection
+  }) async {
+    try {
+      final preview = (messageType == 'image')
+          ? '📷 Photo'
+          : (messageText.length > 120
+          ? '${messageText.substring(0, 120)}…'
+          : messageText);
+
+      final ref =
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'userId': recipientUserId,
+        'type': 'message',
+        'title': 'New message from $senderName',
+        'message': preview,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'actionType': 'open_chat',
+        'actionData': {
+          'conversationId': conversationId,
+          'otherUserId': senderUserId,
+          'isOldFormat': isOldFormat,   // <-- mobile will read this
+        },
+        'metadata': {
+          'senderName': senderName,
+          'senderId': senderUserId,
+          'messageId': messageId,
+        },
+      });
+
+      debugPrint('🔔 created chat notification ${ref.id} → '
+          'recipient=$recipientUserId convo=$conversationId old=$isOldFormat');
+    } catch (e) {
+      debugPrint('❌ failed to create chat notification: $e');
+      rethrow;
+    }
   }
 }
