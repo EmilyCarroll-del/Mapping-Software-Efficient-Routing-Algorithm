@@ -9,7 +9,7 @@ class GraphScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: const Color(0xFF0D2B0D),
         title: const Text('Graph Visualization'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

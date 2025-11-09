@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'screens/home_screen.dart';
 import 'screens/graph_screen.dart';
@@ -61,6 +62,44 @@ class _AuthStateNotifier extends ChangeNotifier {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load environment variables
+  try {
+    print('Loading .env file...');
+    await dotenv.load(fileName: ".env");
+    
+    // Verify that .env file was loaded successfully
+    final hasApiKey = dotenv.env['AWS_API_KEY'] != null && dotenv.env['AWS_API_KEY']!.isNotEmpty;
+    final hasRegion = dotenv.env['AWS_REGION'] != null;
+    final hasCalculator = dotenv.env['AWS_CALCULATOR_NAME'] != null;
+    
+    print('✅ .env file loaded successfully');
+    print('AWS_API_KEY: ${hasApiKey ? "Found" : "Not found"}');
+    print('AWS_REGION: ${hasRegion ? dotenv.env['AWS_REGION'] : "Not found"}');
+    print('AWS_CALCULATOR_NAME: ${hasCalculator ? dotenv.env['AWS_CALCULATOR_NAME'] : "Not found"}');
+    
+    if (!hasApiKey && !hasRegion) {
+      print('⚠️ Warning: AWS credentials not found in .env file');
+      print('   AWS Route Service will not be available');
+      print('   To enable AWS routing:');
+      print('   1. Ensure .env file exists in project root');
+      print('   2. Add AWS_API_KEY=your_key to .env');
+      print('   3. Add AWS_REGION=us-east-1 to .env');
+      print('   4. Add AWS_CALCULATOR_NAME=GraphGoRouteCalculator to .env');
+      print('   5. Ensure .env is listed in pubspec.yaml assets section');
+    }
+  } catch (e, stackTrace) {
+    print('❌ Error loading .env file: $e');
+    print('Stack trace: $stackTrace');
+    print('AWS Route Service will not be available');
+    print('');
+    print('Troubleshooting steps:');
+    print('1. Ensure .env file exists in the project root directory');
+    print('2. Ensure .env is listed in pubspec.yaml under flutter: assets:');
+    print('3. Run "flutter pub get" to refresh assets');
+    print('4. Restart the app after adding .env to assets');
+  }
+  
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

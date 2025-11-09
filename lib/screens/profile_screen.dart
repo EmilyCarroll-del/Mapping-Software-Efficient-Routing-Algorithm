@@ -307,7 +307,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         appBar: AppBar(
           automaticallyImplyLeading: false,
           title: const Text('Driver Profile'),
-          backgroundColor: kPrimaryColor,
+          backgroundColor: const Color(0xFF0D2B0D),
           foregroundColor: Colors.white,
         ),
         body: const Center(
@@ -319,7 +319,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: kPrimaryColor,
+        backgroundColor: const Color(0xFF0D2B0D),
         foregroundColor: Colors.white,
         title: const Text(
           "Driver Profile",

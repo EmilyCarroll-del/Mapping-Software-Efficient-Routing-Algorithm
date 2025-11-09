@@ -337,7 +337,7 @@ class _InboxPageState extends State<InboxPage> {
             ElevatedButton(
               onPressed: () => Navigator.pushNamed(context, '/login'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimaryColor,
+                backgroundColor: const Color(0xFF0D2B0D),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -524,7 +524,7 @@ class _InboxPageState extends State<InboxPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Inbox'),
-          backgroundColor: kPrimaryColor,
+          backgroundColor: const Color(0xFF0D2B0D),
           foregroundColor: Colors.white,
         ),
         body: _buildLoginPrompt(),
@@ -541,7 +541,7 @@ class _InboxPageState extends State<InboxPage> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: kPrimaryColor,
+        backgroundColor: const Color(0xFF0D2B0D),
         foregroundColor: Colors.white,
         elevation: 0,
       ),

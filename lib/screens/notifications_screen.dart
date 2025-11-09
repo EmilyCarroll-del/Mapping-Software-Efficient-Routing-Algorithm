@@ -25,7 +25,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Notifications'),
-          backgroundColor: kPrimaryColor,
+          backgroundColor: const Color(0xFF0D2B0D),
           foregroundColor: Colors.white,
         ),
         body: const Center(
@@ -37,7 +37,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notifications'),
-        backgroundColor: kPrimaryColor,
+        backgroundColor: const Color(0xFF0D2B0D),
         foregroundColor: Colors.white,
         actions: [
           IconButton(

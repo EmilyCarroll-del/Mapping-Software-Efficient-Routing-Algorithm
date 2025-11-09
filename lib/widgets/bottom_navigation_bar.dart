@@ -14,6 +14,8 @@ class CustomBottomNavigationBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final notificationService = NotificationService();
     final currentUser = FirebaseAuth.instance.currentUser;
+    const darkGreen = Color(0xFF0D2B0D); // Match header color
+    
     int currentIndex = 0;
     if (currentLocation.startsWith('/inbox')) {
       currentIndex = 1;
@@ -23,7 +25,7 @@ class CustomBottomNavigationBar extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: kPrimaryColor,
+        color: darkGreen,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.15),
@@ -49,7 +51,7 @@ class CustomBottomNavigationBar extends StatelessWidget {
             }
           },
           type: BottomNavigationBarType.fixed,
-          backgroundColor: kPrimaryColor,
+          backgroundColor: darkGreen,
           selectedItemColor: Colors.white,
           unselectedItemColor: Colors.white70,
           selectedFontSize: 12,
