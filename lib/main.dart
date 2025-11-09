@@ -1,11 +1,12 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
+
 import 'screens/home_screen.dart';
 import 'screens/graph_screen.dart';
 import 'screens/settings_screen.dart';
@@ -21,56 +22,31 @@ import 'screens/chat_page.dart';
 import 'login.dart';
 import 'signup.dart';
 
-// Background message handler (must be top-level function)
+// ---------------------------------------------------------------------------
+// Background FCM handler (must be a top-level function).
+// We **do not** write Firestore notifications here to avoid duplicates.
+// Use it only for logging or preloading if you need to.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  print('Handling background message: ${message.messageId}');
-  
-  // Create notification directly in Firestore
-  final db = FirebaseFirestore.instance;
-  final auth = FirebaseAuth.instance;
-  final currentUser = auth.currentUser;
-  
-  if (currentUser != null) {
-    await db.collection('notifications').add({
-      'userId': currentUser.uid,
-      'type': message.data['type'] ?? 'system',
-      'title': message.notification?.title ?? message.data['title'] ?? 'Notification',
-      'message': message.notification?.body ?? message.data['message'] ?? '',
-      'timestamp': FieldValue.serverTimestamp(),
-      'isRead': false,
-      'actionType': message.data['actionType'] ?? 'none',
-      'actionData': {
-        'orderId': message.data['orderId'],
-        'conversationId': message.data['conversationId'],
-        'url': message.data['url'],
-      },
-      'metadata': {},
-    });
-  }
+  // print('BG message: ${message.messageId} data=${message.data}');
 }
+// ---------------------------------------------------------------------------
 
-// Listenable class for auth state changes
 class _AuthStateNotifier extends ChangeNotifier {
   _AuthStateNotifier() {
-    FirebaseAuth.instance.authStateChanges().listen((User? user) {
-      notifyListeners();
-    });
+    FirebaseAuth.instance.authStateChanges().listen((_) => notifyListeners());
   }
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  
-  // Register background message handler
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Register the background handler (no Firestore writes here)
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  
-  // Initialize notification service when user is logged in
-  // Use a singleton instance to avoid multiple initializations
+
+  // Initialize NotificationService tied to auth state
   final notificationService = NotificationService();
   FirebaseAuth.instance.authStateChanges().listen((user) {
     if (user != null) {
@@ -79,13 +55,13 @@ void main() async {
       notificationService.dispose();
     }
   });
-  
-  // Also initialize if user is already logged in
+
+  // If already logged in at startup
   final currentUser = FirebaseAuth.instance.currentUser;
   if (currentUser != null) {
-    notificationService.initialize();
+    await notificationService.initialize();
   }
-  
+
   runApp(const GraphGoApp());
 }
 
@@ -95,7 +71,7 @@ class GraphGoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (context) => DeliveryProvider()..initialize(),
+      create: (_) => DeliveryProvider()..initialize(),
       child: MaterialApp.router(
         title: 'GraphGo - Route Optimization',
         theme: ThemeData(
@@ -110,91 +86,70 @@ class GraphGoApp extends StatelessWidget {
 
 final GoRouter _router = GoRouter(
   refreshListenable: _AuthStateNotifier(),
-  redirect: (BuildContext context, GoRouterState state) {
+  redirect: (context, state) {
     final user = FirebaseAuth.instance.currentUser;
     final isLoggedIn = user != null;
-    final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
-    
-    // If user is logged in and trying to access login/signup pages, redirect to home
-    if (isLoggedIn && isLoggingIn) {
-      return '/';
-    }
-    
-    // Note: Mobile app is exclusively for drivers. Admin functionality is web-only.
-    // All mobile app signups automatically set userType: 'driver'
-    // All admin users MUST have a companyCode (required during web app signup)
-    
-    // No automatic redirect to login - let the home screen handle it
-    return null; // No redirect needed
+    final isAuthRoute =
+        state.matchedLocation == '/login' || state.matchedLocation == '/signup';
+
+    if (isLoggedIn && isAuthRoute) return '/';
+    return null;
   },
   routes: <RouteBase>[
     ShellRoute(
-      builder: (context, state, child) {
-        return Scaffold(
-          body: child,
-          bottomNavigationBar: CustomBottomNavigationBar(currentLocation: state.matchedLocation),
-        );
-      },
+      builder: (context, state, child) => Scaffold(
+        body: child,
+        bottomNavigationBar:
+        CustomBottomNavigationBar(currentLocation: state.matchedLocation),
+      ),
       routes: <RouteBase>[
         GoRoute(
           path: '/',
-          builder: (BuildContext context, GoRouterState state) {
-            return const HomeScreen();
-          },
+          builder: (_, __) => const HomeScreen(),
         ),
         GoRoute(
           path: '/inbox',
-          builder: (BuildContext context, GoRouterState state) {
-            final openId = state.extra is Map<String, dynamic>
-                ? (state.extra as Map<String, dynamic>)['openConversationId']?.toString()
+          builder: (_, state) {
+            final extra = state.extra;
+            final openId = extra is Map<String, dynamic>
+                ? extra['openConversationId']?.toString()
                 : null;
             return InboxPage(openConversationId: openId);
           },
         ),
         GoRoute(
           path: '/profile',
-          builder: (BuildContext context, GoRouterState state) {
-            return const ProfileScreen();
-          },
+          builder: (_, __) => const ProfileScreen(),
         ),
         GoRoute(
           path: '/notifications',
-          builder: (BuildContext context, GoRouterState state) {
-            return const NotificationsScreen();
-          },
+          builder: (_, __) => const NotificationsScreen(),
         ),
         GoRoute(
           path: '/route-history',
-          builder: (BuildContext context, GoRouterState state) {
-            return const RouteHistoryScreen();
-          },
+          builder: (_, __) => const RouteHistoryScreen(),
         ),
         GoRoute(
           path: '/assigned-orders',
-          builder: (BuildContext context, GoRouterState state) {
-            return const DriverAssignedOrdersScreen();
-          },
+          builder: (_, __) => const DriverAssignedOrdersScreen(),
         ),
         GoRoute(
           path: '/chat',
-          builder: (BuildContext context, GoRouterState state) {
-            final extras = state.extra is Map<String, dynamic>
-                ? state.extra as Map<String, dynamic>
-                : <String, dynamic>{};
-
+          builder: (_, state) {
+            final extras =
+            state.extra is Map<String, dynamic> ? state.extra as Map<String, dynamic> : {};
             final conversationId = extras['conversationId']?.toString();
             final otherUserId = extras['otherUserId']?.toString();
             final otherUserName = (extras['otherUserName']?.toString()) ?? 'User';
             final orderId = extras['orderId']?.toString();
             final orderTitle = extras['orderTitle']?.toString();
-            final isOldFormat = (extras['isOldFormat'] is bool) ? extras['isOldFormat'] as bool : false;
+            final isOldFormat =
+            extras['isOldFormat'] is bool ? extras['isOldFormat'] as bool : false;
 
             if (conversationId == null || otherUserId == null) {
               return Scaffold(
                 appBar: AppBar(title: const Text('Chat')),
-                body: const Center(
-                  child: Text('Invalid chat parameters'),
-                ),
+                body: const Center(child: Text('Invalid chat parameters')),
               );
             }
 
@@ -210,29 +165,21 @@ final GoRouter _router = GoRouter(
         ),
         GoRoute(
           path: '/graph',
-          builder: (BuildContext context, GoRouterState state) {
-            return const GraphScreen();
-          },
+          builder: (_, __) => const GraphScreen(),
         ),
         GoRoute(
           path: '/settings',
-          builder: (BuildContext context, GoRouterState state) {
-            return const SettingsScreen();
-          },
+          builder: (_, __) => const SettingsScreen(),
         ),
       ],
     ),
     GoRoute(
       path: '/login',
-      builder: (BuildContext context, GoRouterState state) {
-        return const LoginPage();
-      },
+      builder: (_, __) => const LoginPage(),
     ),
     GoRoute(
       path: '/signup',
-      builder: (BuildContext context, GoRouterState state) {
-        return const SignupPage();
-      },
+      builder: (_, __) => const SignupPage(),
     ),
   ],
 );

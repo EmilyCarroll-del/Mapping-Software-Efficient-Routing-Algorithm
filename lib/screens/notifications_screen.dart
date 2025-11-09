@@ -43,7 +43,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           IconButton(
             icon: const Icon(Icons.done_all),
             tooltip: 'Mark all as read',
-            onPressed: () => _markAllAsRead(),
+            onPressed: _markAllAsRead,
           ),
         ],
       ),
@@ -88,9 +88,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 final groupedNotifications = _groupNotificationsByDate(notifications);
 
                 return RefreshIndicator(
-                  onRefresh: () async {
-                    setState(() {});
-                  },
+                  onRefresh: () async => setState(() {}),
                   child: ListView.builder(
                     itemCount: groupedNotifications.length,
                     itemBuilder: (context, index) {
@@ -110,7 +108,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             ),
                           ),
                           ...(group['notifications'] as List<DocumentSnapshot>)
-                              .map((notification) => _buildNotificationTile(notification))
+                              .map((n) => _buildNotificationTile(n))
                               .toList(),
                         ],
                       );
@@ -160,11 +158,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       child: FilterChip(
         label: Text(label),
         selected: isSelected,
-        onSelected: (selected) {
-          setState(() {
-            _filterType = type;
-          });
-        },
+        onSelected: (_) => setState(() => _filterType = type),
         selectedColor: kPrimaryColor.withOpacity(0.2),
         checkmarkColor: kPrimaryColor,
         labelStyle: TextStyle(
@@ -176,35 +170,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Stream<QuerySnapshot> _getNotificationsStream() {
-    // Avoid index requirements by removing orderBy and sort client-side.
     final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
-      return const Stream.empty();
-    }
+    if (currentUser == null) return const Stream.empty();
 
     final baseQuery = FirebaseFirestore.instance
         .collection('notifications')
         .where('userId', isEqualTo: currentUser.uid);
 
-    if (_filterType == 'all') {
-      return baseQuery.snapshots();
-    }
-
-    return baseQuery
-        .where('type', isEqualTo: _filterType)
-        .snapshots();
+    if (_filterType == 'all') return baseQuery.snapshots();
+    return baseQuery.where('type', isEqualTo: _filterType).snapshots();
   }
 
-  List<Map<String, dynamic>> _groupNotificationsByDate(List<QueryDocumentSnapshot> notifications) {
-    // First sort by timestamp desc client-side
+  List<Map<String, dynamic>> _groupNotificationsByDate(
+      List<QueryDocumentSnapshot> notifications,
+      ) {
     notifications.sort((a, b) {
       final ad = a.data() as Map<String, dynamic>;
       final bd = b.data() as Map<String, dynamic>;
-      final at = ad['timestamp'] as Timestamp?;
-      final bt = bd['timestamp'] as Timestamp?;
-      final adt = at?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final bdt = bt?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return bdt.compareTo(adt);
+      final at = (ad['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final bt = (bd['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
+      return bt.compareTo(at);
     });
 
     final groups = <String, List<DocumentSnapshot>>{};
@@ -215,10 +200,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     for (var notification in notifications) {
       final data = notification.data() as Map<String, dynamic>;
-      final timestamp = data['timestamp'] as Timestamp?;
-      if (timestamp == null) continue;
-
-      final date = timestamp.toDate();
+      final date = (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
       final dateOnly = DateTime(date.year, date.month, date.day);
 
       String header;
@@ -235,14 +217,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       groups.putIfAbsent(header, () => []).add(notification);
     }
 
-    // Return in order: Today, Yesterday, This Week, Older
     final orderedHeaders = ['Today', 'Yesterday', 'This Week', 'Older'];
     return orderedHeaders
-        .where((header) => groups.containsKey(header))
-        .map((header) => {
-              'header': header,
-              'notifications': groups[header]!,
-            })
+        .where((h) => groups.containsKey(h))
+        .map((h) => {'header': h, 'notifications': groups[h]!})
         .toList();
   }
 
@@ -251,9 +229,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final title = data['title'] ?? 'Notification';
     final message = data['message'] ?? '';
     final type = data['type'] ?? 'system';
-    final timestamp = data['timestamp'] != null
-        ? (data['timestamp'] as Timestamp).toDate()
-        : DateTime.now();
+    final timestamp =
+        (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
     final isRead = data['isRead'] ?? false;
     final actionType = data['actionType'] ?? 'none';
     final actionData = data['actionData'] as Map<String, dynamic>? ?? {};
@@ -275,6 +252,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           actionType,
           actionData,
           metadata,
+          type,
         ),
         leading: CircleAvatar(
           backgroundColor: _getTypeColor(type).withOpacity(0.2),
@@ -307,43 +285,27 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 const SizedBox(width: 4),
                 Text(
                   _formatTimestamp(timestamp),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),
               ],
             ),
           ],
         ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (!isRead)
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: kPrimaryColor,
-                  shape: BoxShape.circle,
-                ),
-              ),
-          ],
-        ),
+        trailing: !isRead
+            ? const CircleAvatar(radius: 4, backgroundColor: kPrimaryColor)
+            : null,
       ),
     );
   }
 
   Future<void> _handleNotificationTap(
-    DocumentSnapshot notification,
-    String actionType,
-    Map<String, dynamic> actionData,
-    Map<String, dynamic> metadata,
-  ) async {
-    // Mark as read
+      DocumentSnapshot notification,
+      String actionType,
+      Map<String, dynamic> actionData,
+      Map<String, dynamic> metadata,
+      String type,
+      ) async {
     await _notificationService.markAsRead(notification.id);
-
-    // Navigate based on action type
     if (!mounted) return;
 
     switch (actionType) {
@@ -358,34 +320,111 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         final conversationId = actionData['conversationId'] as String?;
         final otherUserId = actionData['otherUserId'] as String?;
         final senderName = metadata['senderName'] as String? ?? 'User';
-        
-        if (conversationId != null && otherUserId != null) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ChatPage(
-                conversationId: conversationId,
-                otherUserId: otherUserId,
-                otherUserName: senderName,
-                isOldFormat: false,
-              ),
-            ),
-          );
-        }
-        break;
+        final isOldFormat = actionData['isOldFormat'] == true;
 
-      case 'view_update':
-        final url = actionData['url'] as String?;
-        if (url != null) {
-          // Handle URL opening (you can use url_launcher package)
-          print('Open URL: $url');
+        if (conversationId != null && otherUserId != null) {
+          _openChat(conversationId, otherUserId, senderName, isOldFormat);
         }
         break;
 
       default:
-        // Just mark as read, no navigation
+        await _tryOpenLegacyMessage(notification);
         break;
     }
+  }
+
+  Future<void> _tryOpenLegacyMessage(DocumentSnapshot notification) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    final data = notification.data() as Map<String, dynamic>;
+    final metadata = (data['metadata'] as Map<String, dynamic>?) ?? {};
+    final actionData = (data['actionData'] as Map<String, dynamic>?) ?? {};
+
+    final String? senderId =
+        (metadata['senderId'] as String?) ?? (actionData['otherUserId'] as String?);
+
+    String? inferredName;
+    if (senderId == null || senderId.isEmpty) {
+      final title = (data['title'] as String?) ?? '';
+      final pattern = RegExp(r'(.+?) sent you a message', caseSensitive: false);
+      final m = pattern.firstMatch(title);
+      if (m != null && m.groupCount >= 1) {
+        inferredName = m.group(1)?.trim();
+      }
+    }
+
+    try {
+      final convSnap = await FirebaseFirestore.instance
+          .collection('conversations')
+          .where('participants', arrayContains: currentUser.uid)
+          .get();
+
+      QueryDocumentSnapshot<Map<String, dynamic>>? picked;
+
+      if (senderId != null && senderId.isNotEmpty) {
+        final matches = convSnap.docs.where((d) {
+          final parts = List<String>.from(d['participants'] ?? []);
+          return parts.contains(senderId);
+        }).toList();
+        if (matches.isNotEmpty) picked = matches.first;
+      }
+
+      if (picked == null && inferredName != null && inferredName.isNotEmpty) {
+        final matches = convSnap.docs.where((d) {
+          final displayNames =
+          Map<String, dynamic>.from(d['displayNames'] ?? {});
+          return displayNames.values.any((v) =>
+          (v as String?)?.toLowerCase() == inferredName!.toLowerCase());
+        }).toList();
+        if (matches.isNotEmpty) picked = matches.first;
+      }
+
+      if (picked != null) {
+        final participants = List<String>.from(picked['participants'] ?? []);
+        final otherId = participants.firstWhere(
+              (id) => id != currentUser.uid,
+          orElse: () => '',
+        );
+        final displayNames =
+        Map<String, dynamic>.from(picked['displayNames'] ?? {});
+        final otherName = (displayNames[otherId] as String?) ??
+            inferredName ??
+            'User';
+        _openChat(picked.id, otherId, otherName, false);
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      final chatsSnap = await FirebaseFirestore.instance
+          .collection('chats')
+          .where('users', arrayContains: currentUser.uid)
+          .get();
+
+      QueryDocumentSnapshot<Map<String, dynamic>>? picked;
+
+      if (senderId != null && senderId.isNotEmpty) {
+        final matches = chatsSnap.docs.where((d) {
+          final users = List<String>.from(d['users'] ?? []);
+          return users.contains(senderId);
+        }).toList();
+        if (matches.isNotEmpty) picked = matches.first;
+      }
+
+      if (picked != null) {
+        final otherId = (senderId ?? '');
+        final displayName =
+            (data['title'] as String?)
+                ?.replaceFirst('New message from ', '') ??
+                inferredName ??
+                'User';
+        _openChat(picked.id, otherId, displayName, true);
+        return;
+      }
+    } catch (_) {}
+
+    _toast('Could not locate a chat for this notification.');
   }
 
   Widget _buildEmptyState() {
@@ -402,7 +441,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         icon = Icons.message;
         break;
       case 'system':
-        message = 'No system notifications达成';
+        message = 'No system notifications';
         icon = Icons.settings;
         break;
       case 'news':
@@ -429,16 +468,36 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             'You will receive notifications here',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[500],
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.grey),
           ),
         ],
       ),
     );
+  }
+
+  void _openChat(
+      String conversationId,
+      String otherUserId,
+      String otherUserName,
+      bool isOldFormat,
+      ) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatPage(
+          conversationId: conversationId,
+          otherUserId: otherUserId,
+          otherUserName: otherUserName,
+          isOldFormat: isOldFormat,
+        ),
+      ),
+    );
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<void> _markAllAsRead() async {

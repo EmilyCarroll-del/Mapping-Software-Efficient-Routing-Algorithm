@@ -7,10 +7,10 @@ class ChatService {
 
   // Create or get existing conversation between two users
   Future<String> createOrGetConversation(
-    String otherUserId, {
-    String? orderId,
-    String? orderTitle,
-  }) async {
+      String otherUserId, {
+        String? orderId,
+        String? orderTitle,
+      }) async {
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
       throw Exception('User must be logged in to create conversation');
@@ -46,34 +46,25 @@ class ChatService {
     }
 
     // Enforce company code and user type rules for chat
-    // If current user is a driver (mobile app user)
     if (currentUserType == 'driver') {
-      // Drivers cannot chat with other drivers
       if (otherUserType == 'driver') {
         throw Exception('Drivers cannot chat with other drivers');
       }
-      
-      // All admins must have a companyCode (enforced in web app signup)
-      // Drivers with companyCode can only chat with admins from same company
       if (currentCompanyCode != null && currentCompanyCode.isNotEmpty) {
         if (otherCompanyCode != currentCompanyCode) {
           throw Exception('You can only chat with admins from your company');
         }
       }
-      // Freelance drivers (no companyCode) can chat with any admin
     }
-    // Admins can chat with drivers following the same rules (enforced from driver side)
-    
-    // Use currentCompanyCode for conversation metadata
+
     final companyCode = currentCompanyCode;
 
-    // Deterministic keys for fast lookup and strict reuse
+    // Deterministic keys
     final sortedIds = [currentUserId, otherUserId]..sort();
     final participantsKey = '${sortedIds[0]}_${sortedIds[1]}';
 
     if (orderId != null && orderId.isNotEmpty) {
       final participantsOrderKey = '${participantsKey}_$orderId';
-      // Fast exact lookup by order-specific key
       final orderMatch = await _db
           .collection('conversations')
           .where('participantsOrderKey', isEqualTo: participantsOrderKey)
@@ -81,13 +72,11 @@ class ChatService {
           .get();
       if (orderMatch.docs.isNotEmpty) {
         final conv = orderMatch.docs.first;
-        // Ensure orderTitle and display names are set
         final data = conv.data();
         final updates = <String, dynamic>{};
         if ((data['orderTitle'] == null || (data['orderTitle'] as String).isEmpty) && orderTitle != null) {
           updates['orderTitle'] = orderTitle;
         }
-        // Backfill display names map
         final displayNames = (data['displayNames'] as Map<String, dynamic>?) ?? {};
         if (!displayNames.containsKey(currentUserId) || (displayNames[currentUserId] as String?)?.isEmpty == true) {
           final me = await getUserDetails(currentUserId);
@@ -102,7 +91,6 @@ class ChatService {
         await ensureDisplayNames(conv.id, [currentUserId, otherUserId]);
         return conv.id;
       } else {
-        // Fallback: older docs might not have the key yet. Try client-side filter.
         final possible = await _db
             .collection('conversations')
             .where('participants', arrayContains: currentUserId)
@@ -112,7 +100,6 @@ class ChatService {
           final parts = List<String>.from(d['participants'] ?? []);
           final convOrderId = (d['orderId'] as String?)?.trim();
           if (parts.contains(otherUserId) && convOrderId == orderId) {
-            // Backfill keys
             await conv.reference.update({
               'participantsKey': participantsKey,
               'participantsOrderKey': participantsOrderKey,
@@ -123,7 +110,6 @@ class ChatService {
         }
       }
     } else {
-      // Generic chat (no order)
       final genericMatch = await _db
           .collection('conversations')
           .where('participantsKey', isEqualTo: participantsKey)
@@ -137,7 +123,7 @@ class ChatService {
       }
     }
 
-    // Also check old 'chats' collection format and migrate if found (only when orderId is null)
+    // Check old 'chats' format for generic chat
     try {
       if (orderId == null) {
         final oldChats = await _db
@@ -148,10 +134,9 @@ class ChatService {
         for (var chat in oldChats.docs) {
           final users = List<String>.from(chat.data()['users'] ?? []);
           if (users.contains(otherUserId)) {
-            // Migrate to new format for generic chat only
             final chatId = chat.id;
             final oldData = chat.data();
-            
+
             final newConvRef = await _db.collection('conversations').add({
               'participants': users,
               'orderId': null,
@@ -192,7 +177,6 @@ class ChatService {
       }
     } catch (e) {
       print('Error checking old chats format: $e');
-      // Continue with creating new conversation
     }
 
     // Create new conversation
@@ -224,20 +208,22 @@ class ChatService {
     return conversationRef.id;
   }
 
-  // Send a message
+  // -------------------------------
+  // Send a message + create recipient notification (Spark-friendly)
+  // -------------------------------
   Future<void> sendMessage(
-    String conversationId,
-    String message, {
-    String? imageUrl,
-    String messageType = 'text',
-  }) async {
+      String conversationId,
+      String message, {
+        String? imageUrl,
+        String messageType = 'text',
+      }) async {
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
       throw Exception('User must be logged in to send messages');
     }
 
-    // Add message to subcollection
-    await _db
+    // 1) Write message
+    final msgRef = await _db
         .collection('conversations')
         .doc(conversationId)
         .collection('messages')
@@ -250,27 +236,55 @@ class ChatService {
       'readBy': [currentUser.uid],
     });
 
-    // Get conversation participants
+    // 2) Update conversation summaries + unread counts
     final conversationDoc = await _db.collection('conversations').doc(conversationId).get();
     final conversationData = conversationDoc.data();
     if (conversationData == null) return;
 
     final participants = List<String>.from(conversationData['participants'] ?? []);
     final unreadCount = Map<String, dynamic>.from(conversationData['unreadCount'] ?? {});
-
-    // Update unread counts (mark as unread for other participants)
     for (var participantId in participants) {
       if (participantId != currentUser.uid) {
         unreadCount[participantId] = (unreadCount[participantId] ?? 0) + 1;
       }
     }
 
-    // Update conversation with last message info
     await _db.collection('conversations').doc(conversationId).update({
-      'lastMessage': message,
+      'lastMessage': (messageType == 'image' && (message == 'Photo' || message.isEmpty))
+          ? '📷 Photo'
+          : message,
       'lastMessageTime': FieldValue.serverTimestamp(),
       'unreadCount': unreadCount,
     });
+
+    // 3) Create recipient notification doc(s) immediately (Spark: no Functions)
+    final senderDetails = await getUserDetails(currentUser.uid);
+    final senderName = senderDetails?['name'] ?? senderDetails?['email'] ?? 'User';
+    final preview = (messageType == 'image')
+        ? '📷 Photo'
+        : (message.length > 120 ? '${message.substring(0, 120)}…' : message);
+
+    final otherUserIds = participants.where((id) => id != currentUser.uid).toList();
+    for (final recipientId in otherUserIds) {
+      await _db.collection('notifications').add({
+        'userId': recipientId,
+        'type': 'message',
+        'title': 'New message from $senderName',
+        'message': preview,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'actionType': 'open_chat',
+        'actionData': {
+          'conversationId': conversationId,
+          'otherUserId': currentUser.uid,
+        },
+        'metadata': {
+          'senderName': senderName,
+          'senderId': currentUser.uid,
+          'messageId': msgRef.id,
+        },
+      });
+    }
   }
 
   // Get messages stream for a conversation
@@ -295,21 +309,18 @@ class ChatService {
         .where('senderId', isNotEqualTo: currentUser.uid)
         .get();
 
-    // Get unread messages (messages not in readBy)
     final unreadMessages = messagesQuery.docs.where((doc) {
       final data = doc.data();
       final readBy = List<String>.from(data['readBy'] ?? []);
       return !readBy.contains(currentUser.uid);
     }).toList();
 
-    // Update unread messages
     for (var messageDoc in unreadMessages) {
       await messageDoc.reference.update({
         'readBy': FieldValue.arrayUnion([currentUser.uid]),
       });
     }
 
-    // Reset unread count for current user
     final conversationDoc = await _db.collection('conversations').doc(conversationId).get();
     final conversationData = conversationDoc.data();
     if (conversationData != null) {
@@ -322,30 +333,24 @@ class ChatService {
     }
   }
 
-  // Get all conversations for current user (checks both new and old formats)
+  // Get all conversations for current user (no orderBy; sort client-side)
   Stream<QuerySnapshot> getUserConversations() {
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
       return const Stream.empty();
     }
-
-    // Query conversations collection (new format)
-    // Query without orderBy to avoid index requirement, we'll sort client-side
-    // This will return conversations from 'conversations' collection
-    // Old 'chats' collection will be handled separately in inbox if needed
     return _db
         .collection('conversations')
         .where('participants', arrayContains: currentUser.uid)
         .snapshots();
   }
 
-  // Get conversations from old 'chats' collection format
+  // Old-format chats
   Stream<QuerySnapshot> getOldChats() {
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
       return const Stream.empty();
     }
-
     return _db
         .collection('chats')
         .where('users', arrayContains: currentUser.uid)
@@ -367,8 +372,8 @@ class ChatService {
           ? ('$firstName $lastName').trim()
           : '';
       String name = (data?['name'] as String?) ?? composedName;
-      if ((name).isEmpty) name = fullNameAlt;
-      if ((name).isEmpty) name = userNameAlt;
+      if (name.isEmpty) name = fullNameAlt;
+      if (name.isEmpty) name = userNameAlt;
       final email = (data?['email'] as String?) ?? '';
 
       return {
@@ -376,7 +381,7 @@ class ChatService {
         'email': email,
         'profileImageUrl': data?['profileImageUrl'],
         'companyCode': data?['companyCode'],
-        'userType': data?['userType'], // Include userType for filtering
+        'userType': data?['userType'],
       };
     } catch (e) {
       print('Error getting user details: $e');
@@ -384,7 +389,7 @@ class ChatService {
     }
   }
 
-  // Ensure displayNames map on conversation contains up-to-date names for given participants
+  // Ensure displayNames map on conversation contains up-to-date names
   Future<void> ensureDisplayNames(String conversationId, List<String> participantIds) async {
     try {
       final convRef = _db.collection('conversations').doc(conversationId);
@@ -477,5 +482,3 @@ class ChatService {
     });
   }
 }
-
-
