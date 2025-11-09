@@ -48,7 +48,6 @@ class NotificationService {
       }
 
       // We do NOT mirror FCM payloads into Firestore here — that was causing duplicates.
-      // Keep the handlers only for logging / future routing if you want.
       FirebaseMessaging.onMessage.listen((msg) {
         debugPrint('📩 onMessage (foreground): ${msg.data}');
       });
@@ -235,6 +234,7 @@ class NotificationService {
   }
 
   /// Generic helper when de-duplication is not required.
+  /// TIP: for chat, pass metadata: {'senderName': '<display name>', 'senderId': '<uid>'}
   Future<void> createNotification({
     required String userId,
     required String type,
@@ -295,7 +295,7 @@ class NotificationService {
   Stream<int> getUnreadCount() {
     final user = _auth.currentUser;
     if (user == null) {
-      return Stream<int>.value(0); // ← no const
+      return Stream<int>.value(0);
     }
     return _db
         .collection('notifications')

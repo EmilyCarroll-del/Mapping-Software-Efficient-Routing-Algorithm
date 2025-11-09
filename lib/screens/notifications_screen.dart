@@ -169,16 +169,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
+  /// Show only UNREAD items. "All" = all types, unread only.
   Stream<QuerySnapshot> _getNotificationsStream() {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return const Stream.empty();
 
-    final baseQuery = FirebaseFirestore.instance
+    Query base = FirebaseFirestore.instance
         .collection('notifications')
-        .where('userId', isEqualTo: currentUser.uid);
+        .where('userId', isEqualTo: currentUser.uid)
+        .where('isRead', isEqualTo: false); // only unread
 
-    if (_filterType == 'all') return baseQuery.snapshots();
-    return baseQuery.where('type', isEqualTo: _filterType).snapshots();
+    if (_filterType != 'all') {
+      base = base.where('type', isEqualTo: _filterType);
+    }
+    return base.snapshots();
   }
 
   List<Map<String, dynamic>> _groupNotificationsByDate(
@@ -226,15 +230,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Widget _buildNotificationTile(DocumentSnapshot notification) {
     final data = notification.data() as Map<String, dynamic>;
-    final title = data['title'] ?? 'Notification';
-    final message = data['message'] ?? '';
     final type = data['type'] ?? 'system';
+    final message = data['message'] ?? '';
     final timestamp =
         (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
     final isRead = data['isRead'] ?? false;
     final actionType = data['actionType'] ?? 'none';
     final actionData = data['actionData'] as Map<String, dynamic>? ?? {};
     final metadata = data['metadata'] as Map<String, dynamic>? ?? {};
+
+    // 👇 Prefer the sender's *name* if present
+    final rawTitle = (data['title'] as String?) ?? 'Notification';
+    final senderName = (metadata['senderName'] as String?)?.trim();
+    final computedTitle =
+    (type == 'message' && senderName != null && senderName.isNotEmpty)
+        ? 'New message from $senderName'
+        : rawTitle;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -263,7 +274,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         ),
         title: Text(
-          title,
+          computedTitle, // <- use name-preferred title
           style: TextStyle(
             fontWeight: isRead ? FontWeight.w500 : FontWeight.bold,
             fontSize: 16,
@@ -305,6 +316,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       Map<String, dynamic> metadata,
       String type,
       ) async {
+    // Mark the tapped one read first (so it disappears)
     await _notificationService.markAsRead(notification.id);
     if (!mounted) return;
 
@@ -312,6 +324,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       case 'view_order':
         final orderId = actionData['orderId'] as String?;
         if (orderId != null) {
+          await _markRelatedAsRead(conversationId: null, otherUserId: null, orderId: orderId);
           context.go('/assigned-orders');
         }
         break;
@@ -322,6 +335,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         final senderName = metadata['senderName'] as String? ?? 'User';
         final isOldFormat = actionData['isOldFormat'] == true;
 
+        // Mark all unread from same thread/sender
+        await _markRelatedAsRead(
+          conversationId: conversationId,
+          otherUserId: otherUserId,
+        );
+
         if (conversationId != null && otherUserId != null) {
           _openChat(conversationId, otherUserId, senderName, isOldFormat);
         }
@@ -330,6 +349,66 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       default:
         await _tryOpenLegacyMessage(notification);
         break;
+    }
+  }
+
+  /// Marks ALL unread notifications in the same thread/sender as read.
+  Future<void> _markRelatedAsRead({
+    String? conversationId,
+    String? otherUserId,
+    String? orderId,
+  }) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    final db = FirebaseFirestore.instance;
+    final List<QuerySnapshot> toMerge = [];
+
+    if (conversationId != null && conversationId.isNotEmpty) {
+      toMerge.add(await db
+          .collection('notifications')
+          .where('userId', isEqualTo: currentUser.uid)
+          .where('isRead', isEqualTo: false)
+          .where('actionData.conversationId', isEqualTo: conversationId)
+          .get());
+    }
+
+    if (otherUserId != null && otherUserId.isNotEmpty) {
+      toMerge.add(await db
+          .collection('notifications')
+          .where('userId', isEqualTo: currentUser.uid)
+          .where('isRead', isEqualTo: false)
+          .where('actionData.otherUserId', isEqualTo: otherUserId)
+          .get());
+
+      toMerge.add(await db
+          .collection('notifications')
+          .where('userId', isEqualTo: currentUser.uid)
+          .where('isRead', isEqualTo: false)
+          .where('metadata.senderId', isEqualTo: otherUserId)
+          .get());
+    }
+
+    if (orderId != null && orderId.isNotEmpty) {
+      toMerge.add(await db
+          .collection('notifications')
+          .where('userId', isEqualTo: currentUser.uid)
+          .where('isRead', isEqualTo: false)
+          .where('actionData.orderId', isEqualTo: orderId)
+          .get());
+    }
+
+    final seen = <String>{};
+    final batch = db.batch();
+    for (final snap in toMerge) {
+      for (final doc in snap.docs) {
+        if (seen.add(doc.id)) {
+          batch.update(doc.reference, {'isRead': true});
+        }
+      }
+    }
+    if (seen.isNotEmpty) {
+      await batch.commit();
     }
   }
 
@@ -388,9 +467,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         );
         final displayNames =
         Map<String, dynamic>.from(picked['displayNames'] ?? {});
-        final otherName = (displayNames[otherId] as String?) ??
-            inferredName ??
-            'User';
+        final otherName =
+            (displayNames[otherId] as String?) ?? inferredName ?? 'User';
+
+        await _markRelatedAsRead(
+          conversationId: picked.id,
+          otherUserId: otherId.isEmpty ? null : otherId,
+        );
+
         _openChat(picked.id, otherId, otherName, false);
         return;
       }
@@ -415,10 +499,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       if (picked != null) {
         final otherId = (senderId ?? '');
         final displayName =
-            (data['title'] as String?)
-                ?.replaceFirst('New message from ', '') ??
+            (data['title'] as String?)?.replaceFirst('New message from ', '') ??
                 inferredName ??
                 'User';
+
+        await _markRelatedAsRead(
+          conversationId: picked.id,
+          otherUserId: otherId.isEmpty ? null : otherId,
+        );
+
         _openChat(picked.id, otherId, displayName, true);
         return;
       }
@@ -469,7 +558,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'You will receive notifications here',
+            'You’re all caught up',
             style: TextStyle(fontSize: 14, color: Colors.grey),
           ),
         ],
@@ -548,9 +637,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     if (difference.inDays == 0) {
       if (difference.inHours == 0) {
-        if (difference.inMinutes == 0) {
-          return 'Just now';
-        }
+        if (difference.inMinutes == 0) return 'Just now';
         return '${difference.inMinutes}m ago';
       }
       return '${difference.inHours}h ago';
