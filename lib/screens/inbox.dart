@@ -7,7 +7,8 @@ import '../services/chat_service.dart';
 import '../colors.dart';
 
 class InboxPage extends StatefulWidget {
-  const InboxPage({super.key});
+  final String? openConversationId;
+  const InboxPage({super.key, this.openConversationId});
 
   @override
   State<InboxPage> createState() => _InboxPageState();
@@ -79,12 +80,12 @@ class _InboxPageState extends State<InboxPage> {
           fillColor: Colors.grey[100],
           suffixIcon: _searchController.text.isNotEmpty
               ? IconButton(
-                  onPressed: () {
-                    _searchController.clear();
-                    _searchConversations('');
-                  },
-                  icon: const Icon(Icons.clear),
-                )
+            onPressed: () {
+              _searchController.clear();
+              _searchConversations('');
+            },
+            icon: const Icon(Icons.clear),
+          )
               : null,
         ),
         onChanged: _searchConversations,
@@ -97,41 +98,41 @@ class _InboxPageState extends State<InboxPage> {
     if (currentUser == null) return const SizedBox.shrink();
 
     final data = conversation.data() as Map<String, dynamic>;
-    
+
     // Handle both old format ('users') and new format ('participants')
     final participantList = List<String>.from(
-      data['participants'] ?? data['users'] ?? []
+        data['participants'] ?? data['users'] ?? []
     );
     final otherUserId = participantList.firstWhere(
-      (id) => id != currentUser.uid,
+          (id) => id != currentUser.uid,
       orElse: () => '',
     );
 
     final lastMessage = data['lastMessage'] as String?;
     final lastMessageTime = (data['lastMessageTime'] as Timestamp?)?.toDate();
-    
+
     // Handle unread count for both formats
     int unreadCount = 0;
     if (data['unreadCount'] != null) {
       unreadCount = ((data['unreadCount'] as Map<String, dynamic>)[currentUser.uid] ?? 0) as int;
     }
-    
+
     final orderTitle = data['orderTitle'] as String?;
 
     return FutureBuilder<Map<String, dynamic>?>(
       future: _chatService.getUserDetails(otherUserId),
       builder: (context, snapshot) {
         final otherUserData = snapshot.data;
-        final otherUserName = otherUserData?['name'] ?? 
-                             otherUserData?['email'] ?? 
-                             'Unknown User';
+        final otherUserName = otherUserData?['name'] ??
+            otherUserData?['email'] ??
+            'Unknown User';
         final otherUserImage = otherUserData?['profileImageUrl'];
 
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           decoration: BoxDecoration(
-            color: unreadCount > 0 
-                ? kPrimaryColor.withOpacity(0.05) 
+            color: unreadCount > 0
+                ? kPrimaryColor.withOpacity(0.05)
                 : Colors.white,
             borderRadius: BorderRadius.circular(12),
           ),
@@ -139,7 +140,7 @@ class _InboxPageState extends State<InboxPage> {
             onTap: () {
               // Check if this is from old 'chats' collection
               final isOldFormat = data['users'] != null && data['participants'] == null;
-              
+
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -158,19 +159,19 @@ class _InboxPageState extends State<InboxPage> {
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundImage: otherUserImage != null 
+                  backgroundImage: otherUserImage != null
                       ? NetworkImage(otherUserImage)
                       : null,
                   backgroundColor: kPrimaryColor.withOpacity(0.1),
                   child: otherUserImage == null
                       ? Text(
-                          otherUserName.isNotEmpty ? otherUserName[0].toUpperCase() : '?',
-                          style: TextStyle(
-                            color: kPrimaryColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                          ),
-                        )
+                    otherUserName.isNotEmpty ? otherUserName[0].toUpperCase() : '?',
+                    style: TextStyle(
+                      color: kPrimaryColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  )
                       : null,
                 ),
                 if (unreadCount > 0)
@@ -337,7 +338,7 @@ class _InboxPageState extends State<InboxPage> {
             ElevatedButton(
               onPressed: () => Navigator.pushNamed(context, '/login'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimaryColor,
+                backgroundColor: const Color(0xFF0D2B0D),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -358,7 +359,7 @@ class _InboxPageState extends State<InboxPage> {
   String _formatTimestamp(DateTime timestamp) {
     final now = DateTime.now();
     final difference = now.difference(timestamp);
-    
+
     if (difference.inDays > 7) {
       return '${timestamp.month}/${timestamp.day}';
     } else if (difference.inDays > 0) {
@@ -423,11 +424,11 @@ class _InboxPageState extends State<InboxPage> {
           builder: (context, oldSnapshot) {
             // Combine conversations from both streams
             final allConversations = <QueryDocumentSnapshot>[];
-            
+
             if (newSnapshot.hasData) {
               allConversations.addAll(newSnapshot.data!.docs);
             }
-            
+
             if (oldSnapshot.hasData) {
               allConversations.addAll(oldSnapshot.data!.docs);
             }
@@ -464,8 +465,8 @@ class _InboxPageState extends State<InboxPage> {
             }
 
             // Show loading if both are waiting
-            if ((newSnapshot.connectionState == ConnectionState.waiting || 
-                 oldSnapshot.connectionState == ConnectionState.waiting) && 
+            if ((newSnapshot.connectionState == ConnectionState.waiting ||
+                oldSnapshot.connectionState == ConnectionState.waiting) &&
                 allConversations.isEmpty) {
               return const Center(
                 child: Column(
@@ -488,14 +489,14 @@ class _InboxPageState extends State<InboxPage> {
             sortedConversations.sort((a, b) {
               final aData = a.data() as Map<String, dynamic>;
               final bData = b.data() as Map<String, dynamic>;
-              
+
               final aTime = aData['lastMessageTime'] as Timestamp?;
               final bTime = bData['lastMessageTime'] as Timestamp?;
-              
+
               if (aTime == null && bTime == null) return 0;
               if (aTime == null) return 1;
               if (bTime == null) return -1;
-              
+
               return bTime.compareTo(aTime); // Descending order (newest first)
             });
 
@@ -524,7 +525,7 @@ class _InboxPageState extends State<InboxPage> {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Inbox'),
-          backgroundColor: kPrimaryColor,
+          backgroundColor: const Color(0xFF0D2B0D),
           foregroundColor: Colors.white,
         ),
         body: _buildLoginPrompt(),
@@ -541,7 +542,7 @@ class _InboxPageState extends State<InboxPage> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: kPrimaryColor,
+        backgroundColor: const Color(0xFF0D2B0D),
         foregroundColor: Colors.white,
         elevation: 0,
       ),

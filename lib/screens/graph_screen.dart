@@ -9,7 +9,7 @@ class GraphScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        backgroundColor: const Color(0xFF0D2B0D),
         title: const Text('Graph Visualization'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -92,7 +92,7 @@ class GraphScreen extends StatelessWidget {
 
   void _showAddNodeDialog(BuildContext context) {
     final TextEditingController controller = TextEditingController();
-    
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -138,7 +138,7 @@ class GraphPainter extends CustomPainter {
     final Paint nodePaint = Paint()
       ..color = Colors.blue
       ..style = PaintingStyle.fill;
-    
+
     final Paint edgePaint = Paint()
       ..color = Colors.grey
       ..strokeWidth = 2.0
@@ -149,7 +149,7 @@ class GraphPainter extends CustomPainter {
     for (final edge in edges) {
       final startNode = nodes.firstWhere((n) => n.id == edge.fromId);
       final endNode = nodes.firstWhere((n) => n.id == edge.toId);
-      
+
       canvas.drawLine(
         Offset(startNode.x, startNode.y),
         Offset(endNode.x, endNode.y),
@@ -164,7 +164,7 @@ class GraphPainter extends CustomPainter {
         20,
         nodePaint,
       );
-      
+
       // Draw node label
       final textPainter = TextPainter(
         text: TextSpan(

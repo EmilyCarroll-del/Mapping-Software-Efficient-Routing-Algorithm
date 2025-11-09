@@ -29,6 +29,8 @@ dependencies:
   google_fonts: ^6.1.0
   animated_text_kit: ^4.2.2
   intl: ^0.19.0
+  flutter_dotenv: ^5.1.0
+  url_launcher: ^6.2.2
 
 dev_dependencies:
   flutter_test:
@@ -39,19 +41,25 @@ dev_dependencies:
   mockito: ^5.4.4
   build_runner: ^2.4.7
   flutter_launcher_icons: ^0.13.1
-  # flutter_native_splash: ^2.3.1
+  #flutter_native_splash: ^2.3.1
 
 flutter_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/icons/img_1.png"
+  adaptive_icon_background: "#1B3D2F"
+  adaptive_icon_foreground: "assets/icons/img_1.png"
 
-# flutter_native_splash:
-#   color: "#1B3D2F"
-#   image: assets/icons/img_1.png
+#flutter_native_splash:
+  #color: "#0D2B0D"
+  #color_dark: "#0D2B0D"
+  #image: assets/icons/img_1.png
+  #android: true
+  #ios: true
 
 flutter:
   uses-material-design: true
   
   assets:
     - assets/icons/
+    - .env

@@ -7,6 +7,7 @@ enum RouteAlgorithm {
   kruskal,
   fordBellman,
   nearestNeighbor,
+  aws,
 }
 
 class RouteOptimization {
@@ -19,6 +20,8 @@ class RouteOptimization {
   final List<RouteStep>? optimizedRoute;
   final double? totalDistance;
   final Duration? estimatedTime;
+  final List<List<double>>? routeGeometry; // [[lat, lng], [lat, lng], ...] for map polyline
+  final String? encodedPolyline; // Optional: encoded polyline
 
   RouteOptimization({
     String? id,
@@ -30,8 +33,10 @@ class RouteOptimization {
     this.optimizedRoute,
     this.totalDistance,
     this.estimatedTime,
+    this.routeGeometry,
+    this.encodedPolyline,
   }) : id = id ?? const Uuid().v4(),
-       createdAt = createdAt ?? DateTime.now();
+        createdAt = createdAt ?? DateTime.now();
 
   bool get isCompleted => completedAt != null && optimizedRoute != null;
 
@@ -45,6 +50,8 @@ class RouteOptimization {
     'optimizedRoute': optimizedRoute?.map((s) => s.toJson()).toList(),
     'totalDistance': totalDistance,
     'estimatedTime': estimatedTime?.inMinutes,
+    'routeGeometry': routeGeometry,
+    'encodedPolyline': encodedPolyline,
   };
 
   factory RouteOptimization.fromJson(Map<String, dynamic> json) => RouteOptimization(
@@ -54,21 +61,27 @@ class RouteOptimization {
         .map((a) => DeliveryAddress.fromJson(a))
         .toList(),
     algorithm: RouteAlgorithm.values.firstWhere(
-      (e) => e.name == json['algorithm'],
+          (e) => e.name == json['algorithm'],
     ),
     createdAt: DateTime.parse(json['createdAt']),
-    completedAt: json['completedAt'] != null 
-        ? DateTime.parse(json['completedAt']) 
+    completedAt: json['completedAt'] != null
+        ? DateTime.parse(json['completedAt'])
         : null,
     optimizedRoute: json['optimizedRoute'] != null
         ? (json['optimizedRoute'] as List)
-            .map((s) => RouteStep.fromJson(s))
-            .toList()
+        .map((s) => RouteStep.fromJson(s))
+        .toList()
         : null,
     totalDistance: json['totalDistance']?.toDouble(),
     estimatedTime: json['estimatedTime'] != null
         ? Duration(minutes: json['estimatedTime'])
         : null,
+    routeGeometry: json['routeGeometry'] != null
+        ? (json['routeGeometry'] as List)
+        .map((point) => (point as List).map((coord) => (coord as num).toDouble()).toList())
+        .toList()
+        : null,
+    encodedPolyline: json['encodedPolyline'],
   );
 }
 

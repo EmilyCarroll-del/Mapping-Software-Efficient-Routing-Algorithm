@@ -1,337 +1,240 @@
+// lib/services/notification_service.dart
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'chat_service.dart';
+import 'package:flutter/foundation.dart';
 
 class NotificationService {
+  NotificationService();
+
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
-  final ChatService _chatService = ChatService();
 
   StreamSubscription<QuerySnapshot>? _orderListener;
-  Map<String, StreamSubscription<QuerySnapshot>> _messageListeners = {};
+
   bool _isInitialized = false;
   String? _currentUserId;
-  Map<String, Map<String, dynamic>> _lastOrderStates = {};
 
-  // Initialize FCM and setup listeners
+  /// Tracks the last seen state for each order so we only notify on changes
+  /// (key: orderId, value: {'status': String, 'address': String})
+  final Map<String, Map<String, dynamic>> _lastOrderStates = {};
+
+  /// Initialize push + Firestore listeners (Spark-friendly: all client-side)
   Future<void> initialize() async {
     if (_isInitialized) return;
 
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) return;
+    final user = _auth.currentUser;
+    if (user == null) return;
 
-    _currentUserId = currentUser.uid;
+    _currentUserId = user.uid;
 
     try {
-      // Request notification permissions
+      // Ask permission + store FCM token on the user doc
       final settings = await _messaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
-
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        // Get FCM token
         final token = await _messaging.getToken();
         if (token != null) {
-          await _saveFCMToken(currentUser.uid, token);
+          await _saveFCMToken(user.uid, token);
         }
-
-        // Listen for token refresh
         _messaging.onTokenRefresh.listen((newToken) {
-          _saveFCMToken(currentUser.uid, newToken);
+          _saveFCMToken(user.uid, newToken);
         });
-
-        // Setup foreground message handler
-        FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-
-        // Setup background message handler (static)
-        FirebaseMessaging.onMessageOpenedApp.listen(_handleBackgroundMessage);
-
-        // Check for initial notification (app opened from terminated state)
-        final initialMessage = await _messaging.getInitialMessage();
-        if (initialMessage != null) {
-          _handleBackgroundMessage(initialMessage);
-        }
       }
 
-      // Setup order and message listeners
+      // We do NOT mirror FCM payloads into Firestore here — that was causing duplicates.
+      FirebaseMessaging.onMessage.listen((msg) {
+        debugPrint('📩 onMessage (foreground): ${msg.data}');
+      });
+      FirebaseMessaging.onMessageOpenedApp.listen((msg) {
+        debugPrint('➡️ onMessageOpenedApp: ${msg.data}');
+      });
+
+      // Orders listener (driver-only)
       await _setupOrderListeners();
-      await _setupMessageListeners();
 
       _isInitialized = true;
     } catch (e) {
-      print('Error initializing NotificationService: $e');
+      debugPrint('❌ Error initializing NotificationService: $e');
     }
   }
 
-  // Save FCM token to user document
+  Future<void> dispose() async {
+    await _orderListener?.cancel();
+    _lastOrderStates.clear();
+    _isInitialized = false;
+    _currentUserId = null;
+  }
+
   Future<void> _saveFCMToken(String userId, String token) async {
     try {
-      await _db.collection('users').doc(userId).update({
-        'fcmToken': token,
-        'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
-      });
+      await _db.collection('users').doc(userId).set(
+        {
+          'fcmToken': token,
+          'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
     } catch (e) {
-      print('Error saving FCM token: $e');
+      debugPrint('❌ Error saving FCM token: $e');
     }
   }
 
-  // Handle foreground messages (app is open)
-  Future<void> _handleForegroundMessage(RemoteMessage message) async {
-    print('Received foreground message: ${message.messageId}');
-
-    // Create notification in Firestore
-    await createNotification(
-      userId: _currentUserId ?? '',
-      type: message.data['type'] ?? 'system',
-      title: message.notification?.title ?? message.data['title'] ?? 'Notification',
-      message: message.notification?.body ?? message.data['message'] ?? '',
-      actionType: message.data['actionType'] ?? 'none',
-      actionData: {
-        'orderId': message.data['orderId'],
-        'conversationId': message.data['conversationId'],
-        'url': message.data['url'],
-      },
-    );
-  }
-
-  // Handle background messages (app in background or terminated)
-  Future<void> _handleBackgroundMessage(RemoteMessage message) async {
-    print('Received background message: ${message.messageId}');
-
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) return;
-
-    // Create notification in Firestore
-    await createNotification(
-      userId: currentUser.uid,
-      type: message.data['type'] ?? 'system',
-      title: message.notification?.title ?? message.data['title'] ?? 'Notification',
-      message: message.notification?.body ?? message.data['message'] ?? '',
-      actionType: message.data['actionType'] ?? 'none',
-      actionData: {
-        'orderId': message.data['orderId'],
-        'conversationId': message.data['conversationId'],
-        'url': message.data['url'],
-      },
-    );
-  }
-
-  // Setup listeners for order changes
+  /// Listen to the current driver's assigned orders and create notifications
+  /// only when a new assignment appears or the status changes.
   Future<void> _setupOrderListeners() async {
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) return;
+    final user = _auth.currentUser;
+    if (user == null) return;
 
-    _orderListener?.cancel();
+    await _orderListener?.cancel();
 
-    // Listen to addresses assigned to current driver
-    final isFirstLoad = _lastOrderStates.isEmpty;
-    
+    bool seeded = false;
+
     _orderListener = _db
         .collection('addresses')
-        .where('driverId', isEqualTo: currentUser.uid)
+        .where('driverId', isEqualTo: user.uid)
         .snapshots()
         .listen((snapshot) async {
-      if (isFirstLoad) {
-        // First load - just store all order states
-        for (var doc in snapshot.docs) {
+      // First pass: seed the state without creating notifications
+      if (!seeded) {
+        for (final doc in snapshot.docs) {
           final data = doc.data() as Map<String, dynamic>;
           _lastOrderStates[doc.id] = {
-            'status': data['status'] ?? 'assigned',
+            'status': (data['status'] ?? 'assigned') as String,
             'address': _formatAddress(data),
           };
         }
+        seeded = true;
         return;
       }
 
-      final currentOrderIds = snapshot.docs.map((doc) => doc.id).toSet();
+      // Track current doc IDs for cleanup
+      final liveIds = snapshot.docs.map((d) => d.id).toSet();
 
-      // Check for new orders or status changes
-      for (var doc in snapshot.docs) {
+      for (final doc in snapshot.docs) {
         final data = doc.data() as Map<String, dynamic>;
         if (data.isEmpty) continue;
 
         final orderId = doc.id;
-        final lastState = _lastOrderStates[orderId];
+        final currentStatus = (data['status'] ?? 'assigned') as String;
+        final address = _formatAddress(data);
 
-        if (lastState == null) {
-          // New order assigned
+        final prev = _lastOrderStates[orderId];
+
+        if (prev == null) {
+          // New assignment detected
           await _createOrderNotification(
             orderId: orderId,
-            address: _formatAddress(data),
-            status: data['status'] ?? 'assigned',
-            type: 'new_assignment',
+            address: address,
+            newStatus: currentStatus,
+            type: _OrderEvent.newAssignment,
           );
-        } else if (lastState['status'] != data['status']) {
+        } else if (prev['status'] != currentStatus) {
           // Status changed
           await _createOrderNotification(
             orderId: orderId,
-            address: _formatAddress(data),
-            oldStatus: lastState['status'],
-            newStatus: data['status'] ?? 'assigned',
-            type: 'status_change',
+            address: address,
+            oldStatus: prev['status'] as String,
+            newStatus: currentStatus,
+            type: _OrderEvent.statusChange,
           );
         }
 
-        // Update last state
+        // Update cache
         _lastOrderStates[orderId] = {
-          'status': data['status'] ?? 'assigned',
-          'address': _formatAddress(data),
+          'status': currentStatus,
+          'address': address,
         };
       }
 
-      // Remove orders that are no longer assigned
-      _lastOrderStates.removeWhere((key, value) => !currentOrderIds.contains(key));
+      // Remove any orders that no longer appear in the stream
+      _lastOrderStates.removeWhere((id, _) => !liveIds.contains(id));
     });
   }
 
-  // Create order notification
+  /// Creates a single, de-duplicated order notification by writing to a
+  /// deterministic document ID. If the same (user, orderId, status) shows up
+  /// again, it won’t create extra rows/cards.
   Future<void> _createOrderNotification({
     required String orderId,
     required String address,
     String? oldStatus,
     String? newStatus,
-    String? status,
-    required String type,
+    required _OrderEvent type,
   }) async {
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) return;
+    final user = _auth.currentUser;
+    if (user == null) return;
 
-    String title;
-    String message;
+    final currentStatus = newStatus ?? 'assigned';
 
-    if (type == 'new_assignment') {
+    late final String title;
+    late final String body;
+
+    if (type == _OrderEvent.newAssignment) {
       title = 'New Order Assigned';
-      message = 'You have been assigned a new order: $address';
-    } else if (type == 'status_change') {
+      body = 'You have been assigned a new order: $address';
+    } else if (type == _OrderEvent.statusChange) {
       title = 'Order Status Updated';
-      message = 'Order status changed from ${_formatStatus(oldStatus)} to ${_formatStatus(newStatus)}: $address';
+      body =
+      'Order status changed from ${_formatStatus(oldStatus)} to ${_formatStatus(newStatus)}: $address';
     } else {
       title = 'Order Update';
-      message = 'Order update: $address';
+      body = 'Order update: $address';
     }
 
-    await createNotification(
-      userId: currentUser.uid,
+    // Deterministic doc id = order_<userId>_<orderId>_<status>
+    final id = 'order_${user.uid}_${orderId}_${currentStatus}';
+
+    await _createNotificationWithId(
+      id: id,
+      userId: user.uid,
       type: 'order',
       title: title,
-      message: message,
+      message: body,
       actionType: 'view_order',
       actionData: {'orderId': orderId},
       metadata: {
-        'orderStatus': newStatus ?? status,
+        'orderStatus': currentStatus,
         'address': address,
       },
     );
   }
 
-  // Setup listeners for message changes
-  Future<void> _setupMessageListeners() async {
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) return;
-
-    // Clean up existing listeners
-    for (var listener in _messageListeners.values) {
-      await listener.cancel();
-    }
-    _messageListeners.clear();
-
-    // Get all user conversations
-    final conversations = await _chatService.getUserConversations().first;
-
-    for (var convDoc in conversations.docs) {
-      final convData = convDoc.data() as Map<String, dynamic>;
-      final participants = List<String>.from(convData['participants'] ?? []);
-      final otherUserId = participants.firstWhere(
-        (id) => id != currentUser.uid,
-        orElse: () => '',
-      );
-
-      if (otherUserId.isEmpty) continue;
-
-      // Listen to messages in this conversation
-      final listener = _db
-          .collection('conversations')
-          .doc(convDoc.id)
-          .collection('messages')
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .snapshots()
-          .listen((snapshot) async {
-        if (snapshot.docs.isEmpty) return;
-
-        final messageDoc = snapshot.docs.first;
-        final messageData = messageDoc.data() as Map<String, dynamic>;
-        final senderId = messageData['senderId'] as String?;
-
-        // Only notify for messages from others
-        if (senderId == null || senderId == currentUser.uid) return;
-
-        // Check if notification already exists for this message
-        final existing = await _db
-            .collection('notifications')
-            .where('userId', isEqualTo: currentUser.uid)
-            .where('type', isEqualTo: 'message')
-            .where('actionData.conversationId', isEqualTo: convDoc.id)
-            .where('timestamp', isGreaterThan: Timestamp.fromDate(
-              DateTime.now().subtract(const Duration(minutes: 1)),
-            ))
-            .limit(1)
-            .get();
-
-        if (existing.docs.isNotEmpty) return;
-
-        // Get sender name
-        final senderData = await _chatService.getUserDetails(senderId);
-        final senderName = senderData?['name'] ?? senderData?['email'] ?? 'Someone';
-
-        final messageText = messageData['message'] as String? ?? '';
-        final preview = messageText.length > 50 
-            ? '${messageText.substring(0, 50)}...' 
-            : messageText;
-
-        await createNotification(
-          userId: currentUser.uid,
-          type: 'message',
-          title: 'New message from $senderName',
-          message: preview,
-          actionType: 'open_chat',
-          actionData: {
-            'conversationId': convDoc.id,
-            'otherUserId': otherUserId,
-          },
-          metadata: {
-            'senderName': senderName,
-            'senderId': senderId,
-            'messageId': messageDoc.id,
-          },
-        );
-      });
-
-      _messageListeners[convDoc.id] = listener;
+  /// Generic helper when you want to force a stable ID (prevents duplicates).
+  Future<void> _createNotificationWithId({
+    required String id,
+    required String userId,
+    required String type,
+    required String title,
+    required String message,
+    String actionType = 'none',
+    Map<String, dynamic>? actionData,
+    Map<String, dynamic>? metadata,
+  }) async {
+    try {
+      await _db.collection('notifications').doc(id).set({
+        'userId': userId,
+        'type': type, // 'order' | 'message' | 'system' | 'news'
+        'title': title,
+        'message': message,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'actionType': actionType, // 'view_order' | 'open_chat' | 'none'
+        'actionData': actionData ?? <String, dynamic>{},
+        'metadata': metadata ?? <String, dynamic>{},
+      }, SetOptions(merge: false)); // overwrite if same id shows up again
+    } catch (e) {
+      debugPrint('❌ Error creating notification (with id): $e');
     }
   }
 
-  // Format address from order data
-  String _formatAddress(Map<String, dynamic> data) {
-    final street = data['streetAddress'] ?? '';
-    final city = data['city'] ?? '';
-    final state = data['state'] ?? '';
-    final zip = data['zipCode'] ?? '';
-    return '$street, $city, $state $zip'.trim();
-  }
-
-  // Format status for display
-  String _formatStatus(String? status) {
-    if (status == null) return 'Unknown';
-    return status.replaceAll('_', ' ').toUpperCase();
-  }
-
-  // Create notification in Firestore
+  /// Generic helper when de-duplication is not required.
+  /// TIP: for chat, pass metadata: {'senderName': '<display name>', 'senderId': '<uid>'}
   Future<void> createNotification({
     required String userId,
     required String type,
@@ -344,92 +247,88 @@ class NotificationService {
     try {
       await _db.collection('notifications').add({
         'userId': userId,
-        'type': type, // 'order' | 'message' | 'system' | 'news'
+        'type': type,
         'title': title,
         'message': message,
         'timestamp': FieldValue.serverTimestamp(),
         'isRead': false,
-        'actionType': actionType, // 'view_order' | 'open_chat' | 'none' | 'view_update'
-        'actionData': actionData ?? {},
-        'metadata': metadata ?? {},
+        'actionType': actionType,
+        'actionData': actionData ?? <String, dynamic>{},
+        'metadata': metadata ?? <String, dynamic>{},
       });
     } catch (e) {
-      print('Error creating notification: $e');
+      debugPrint('❌ Error creating notification: $e');
     }
   }
 
-  // Mark notification as read
   Future<void> markAsRead(String notificationId) async {
     try {
       await _db.collection('notifications').doc(notificationId).update({
         'isRead': true,
       });
     } catch (e) {
-      print('Error marking notification as read: $e');
+      debugPrint('❌ Error marking notification as read: $e');
     }
   }
 
-  // Mark all notifications as read
   Future<void> markAllAsRead() async {
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) return;
+    final user = _auth.currentUser;
+    if (user == null) return;
 
     try {
-      final notifications = await _db
+      final q = await _db
           .collection('notifications')
-          .where('userId', isEqualTo: currentUser.uid)
+          .where('userId', isEqualTo: user.uid)
           .where('isRead', isEqualTo: false)
           .get();
 
       final batch = _db.batch();
-      for (var doc in notifications.docs) {
+      for (final doc in q.docs) {
         batch.update(doc.reference, {'isRead': true});
       }
       await batch.commit();
     } catch (e) {
-      print('Error marking all notifications as read: $e');
+      debugPrint('❌ Error marking all as read: $e');
     }
   }
 
-  // Get unread count stream
   Stream<int> getUnreadCount() {
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) {
-      return Stream.value(0);
+    final user = _auth.currentUser;
+    if (user == null) {
+      return Stream<int>.value(0);
     }
-
     return _db
         .collection('notifications')
-        .where('userId', isEqualTo: currentUser.uid)
+        .where('userId', isEqualTo: user.uid)
         .where('isRead', isEqualTo: false)
         .snapshots()
-        .map((snapshot) => snapshot.docs.length);
+        .map((s) => s.docs.length);
   }
 
-  // Get all notifications stream
   Stream<QuerySnapshot> getNotifications() {
-    final currentUser = _auth.currentUser;
-    if (currentUser == null) {
-      return const Stream.empty();
-    }
-
+    final user = _auth.currentUser;
+    if (user == null) return const Stream.empty();
     return _db
         .collection('notifications')
-        .where('userId', isEqualTo: currentUser.uid)
+        .where('userId', isEqualTo: user.uid)
         .orderBy('timestamp', descending: true)
         .snapshots();
   }
 
-  // Cleanup listeners
-  Future<void> dispose() async {
-    await _orderListener?.cancel();
-    for (var listener in _messageListeners.values) {
-      await listener.cancel();
-    }
-    _messageListeners.clear();
-    _lastOrderStates.clear();
-    _isInitialized = false;
-    _currentUserId = null;
+  // ---- helpers ----
+
+  String _formatAddress(Map<String, dynamic> data) {
+    final street = (data['streetAddress'] ?? '').toString();
+    final city = (data['city'] ?? '').toString();
+    final state = (data['state'] ?? '').toString();
+    final zip = (data['zipCode'] ?? '').toString();
+    return '$street, $city, $state $zip'.trim();
+  }
+
+  String _formatStatus(String? status) {
+    if (status == null) return 'UNKNOWN';
+    return status.replaceAll('_', ' ').toUpperCase();
   }
 }
 
+enum _OrderEvent { newAssignment, statusChange }

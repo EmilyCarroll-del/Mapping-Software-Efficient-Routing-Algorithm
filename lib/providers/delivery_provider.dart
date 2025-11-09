@@ -9,15 +9,19 @@ import '../services/geocoding_service.dart';
 class DeliveryProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  
+
   List<DeliveryAddress> _addresses = [];
   List<RouteOptimization> _routeOptimizations = [];
+  List<Map<String, dynamic>> _assignedOrders = [];
   bool _isLoading = false;
   String? _error;
 
   // Getters
   List<DeliveryAddress> get addresses => List.unmodifiable(_addresses);
-  List<RouteOptimization> get routeOptimizations => List.unmodifiable(_routeOptimizations);
+  List<RouteOptimization> get routeOptimizations =>
+      List.unmodifiable(_routeOptimizations);
+  List<Map<String, dynamic>> get assignedOrders =>
+      List.unmodifiable(_assignedOrders);
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasAddresses => _addresses.isNotEmpty;
@@ -28,6 +32,7 @@ class DeliveryProvider extends ChangeNotifier {
   Future<void> initialize() async {
     await _loadAddresses();
     await _loadRouteOptimizations();
+    await _loadAssignedOrders();
   }
 
   // Address Management
@@ -42,13 +47,13 @@ class DeliveryProvider extends ChangeNotifier {
     try {
       // Geocode the address
       final geocodedAddress = await GeocodingService.geocodeAddress(address);
-      
+
       // Add to local list
       _addresses.add(geocodedAddress);
-      
+
       // Save to Firestore
       await _saveAddressToFirestore(geocodedAddress);
-      
+
       _error = null;
     } catch (e) {
       _error = 'Failed to add address: ${e.toString()}';
@@ -63,16 +68,16 @@ class DeliveryProvider extends ChangeNotifier {
     try {
       // Geocode the updated address
       final geocodedAddress = await GeocodingService.geocodeAddress(address);
-      
+
       // Update local list
       final index = _addresses.indexWhere((a) => a.id == address.id);
       if (index != -1) {
         _addresses[index] = geocodedAddress;
       }
-      
+
       // Update in Firestore
       await _updateAddressInFirestore(geocodedAddress);
-      
+
       _error = null;
     } catch (e) {
       _error = 'Failed to update address: ${e.toString()}';
@@ -86,10 +91,10 @@ class DeliveryProvider extends ChangeNotifier {
     try {
       // Remove from local list
       _addresses.removeWhere((a) => a.id == addressId);
-      
+
       // Remove from Firestore
       await _removeAddressFromFirestore(addressId);
-      
+
       _error = null;
     } catch (e) {
       _error = 'Failed to remove address: ${e.toString()}';
@@ -101,15 +106,17 @@ class DeliveryProvider extends ChangeNotifier {
   Future<void> geocodeAllAddresses() async {
     _setLoading(true);
     try {
-      final addressesToGeocode = _addresses.where((a) => !a.hasCoordinates).toList();
-      
+      final addressesToGeocode =
+          _addresses.where((a) => !a.hasCoordinates).toList();
+
       if (addressesToGeocode.isEmpty) {
         _setLoading(false);
         return;
       }
-      
-      final geocodedAddresses = await GeocodingService.geocodeAddresses(addressesToGeocode);
-      
+
+      final geocodedAddresses =
+          await GeocodingService.geocodeAddresses(addressesToGeocode);
+
       // Update addresses with coordinates
       for (final geocodedAddress in geocodedAddresses) {
         final index = _addresses.indexWhere((a) => a.id == geocodedAddress.id);
@@ -117,12 +124,12 @@ class DeliveryProvider extends ChangeNotifier {
           _addresses[index] = geocodedAddress;
         }
       }
-      
+
       // Update in Firestore
       for (final address in geocodedAddresses) {
         await _updateAddressInFirestore(address);
       }
-      
+
       _error = null;
     } catch (e) {
       _error = 'Failed to geocode addresses: ${e.toString()}';
@@ -145,53 +152,64 @@ class DeliveryProvider extends ChangeNotifier {
     try {
       final start = startAddress ?? _addresses.first;
       List<DeliveryAddress> optimizedRoute;
-      
+
       switch (algorithm) {
         case RouteAlgorithm.dijkstra:
-          optimizedRoute = RoutingAlgorithms.dijkstraAlgorithm(_addresses, start);
+          optimizedRoute =
+              RoutingAlgorithms.dijkstraAlgorithm(_addresses, start);
           break;
         case RouteAlgorithm.prim:
           optimizedRoute = RoutingAlgorithms.primAlgorithm(_addresses, start);
           break;
         case RouteAlgorithm.kruskal:
-          optimizedRoute = RoutingAlgorithms.kruskalAlgorithm(_addresses, start);
+          optimizedRoute =
+              RoutingAlgorithms.kruskalAlgorithm(_addresses, start);
           break;
         case RouteAlgorithm.fordBellman:
-          optimizedRoute = RoutingAlgorithms.fordBellmanAlgorithm(_addresses, start);
+          optimizedRoute =
+              RoutingAlgorithms.fordBellmanAlgorithm(_addresses, start);
           break;
         case RouteAlgorithm.nearestNeighbor:
-          optimizedRoute = RoutingAlgorithms.nearestNeighborAlgorithm(_addresses, start);
+          optimizedRoute =
+              RoutingAlgorithms.nearestNeighborAlgorithm(_addresses, start);
           break;
+        case RouteAlgorithm.aws:
+          throw Exception(
+              'AWS routing should be handled via AwsRouteService directly');
       }
-      
+
       // Calculate total distance and estimated time
       double totalDistance = 0;
       final routeSteps = <RouteStep>[];
-      
+
       for (int i = 0; i < optimizedRoute.length; i++) {
         final currentAddress = optimizedRoute[i];
         double distanceFromPrevious = 0;
-        
+
         if (i > 0) {
           final previousAddress = optimizedRoute[i - 1];
           if (currentAddress.hasCoordinates && previousAddress.hasCoordinates) {
             distanceFromPrevious = RoutingAlgorithms.calculateDistance(
-              previousAddress.latitude!, previousAddress.longitude!,
-              currentAddress.latitude!, currentAddress.longitude!,
+              previousAddress.latitude!,
+              previousAddress.longitude!,
+              currentAddress.latitude!,
+              currentAddress.longitude!,
             );
             totalDistance += distanceFromPrevious;
           }
         }
-        
+
         routeSteps.add(RouteStep(
           sequenceNumber: i + 1,
           address: currentAddress,
           distanceFromPrevious: distanceFromPrevious,
-          estimatedTravelTime: Duration(minutes: (distanceFromPrevious * 2).round()), // Assume 30 km/h average
+          estimatedTravelTime: Duration(
+              minutes:
+                  (distanceFromPrevious * 2).round()), // Assume 30 km/h average
           instructions: _generateInstructions(currentAddress, i),
         ));
       }
-      
+
       final routeOptimization = RouteOptimization(
         name: name,
         addresses: optimizedRoute,
@@ -201,13 +219,13 @@ class DeliveryProvider extends ChangeNotifier {
         estimatedTime: Duration(minutes: (totalDistance * 2).round()),
         completedAt: DateTime.now(),
       );
-      
+
       // Add to local list
       _routeOptimizations.add(routeOptimization);
-      
+
       // Save to Firestore
       await _saveRouteOptimizationToFirestore(routeOptimization);
-      
+
       _error = null;
       return routeOptimization;
     } catch (e) {
@@ -223,10 +241,10 @@ class DeliveryProvider extends ChangeNotifier {
     try {
       // Remove from local list
       _routeOptimizations.removeWhere((r) => r.id == routeId);
-      
+
       // Remove from Firestore
       await _removeRouteOptimizationFromFirestore(routeId);
-      
+
       _error = null;
     } catch (e) {
       _error = 'Failed to delete route: ${e.toString()}';
@@ -254,18 +272,18 @@ class DeliveryProvider extends ChangeNotifier {
     try {
       final user = _auth.currentUser;
       if (user == null) return;
-      
+
       final snapshot = await _firestore
           .collection('users')
           .doc(user.uid)
           .collection('addresses')
           .orderBy('createdAt', descending: true)
           .get();
-      
+
       _addresses = snapshot.docs
           .map((doc) => DeliveryAddress.fromJson(doc.data()))
           .toList();
-      
+
       notifyListeners();
     } catch (e) {
       _error = 'Failed to load addresses: ${e.toString()}';
@@ -276,28 +294,51 @@ class DeliveryProvider extends ChangeNotifier {
     try {
       final user = _auth.currentUser;
       if (user == null) return;
-      
+
       final snapshot = await _firestore
           .collection('users')
           .doc(user.uid)
           .collection('routeOptimizations')
           .orderBy('createdAt', descending: true)
           .get();
-      
+
       _routeOptimizations = snapshot.docs
           .map((doc) => RouteOptimization.fromJson(doc.data()))
           .toList();
-      
+
       notifyListeners();
     } catch (e) {
       _error = 'Failed to load route optimizations: ${e.toString()}';
     }
   }
 
+  Future<void> _loadAssignedOrders() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+
+      final snapshot = await _firestore
+          .collection('orders')
+          .where('driverIds', arrayContains: user.uid)
+          .where('status', isEqualTo: 'assigned')
+          .get();
+
+      _assignedOrders = snapshot.docs
+          .map((doc) => {
+                'id': doc.id,
+                ...doc.data(),
+              })
+          .toList();
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to load assigned orders: ${e.toString()}';
+    }
+  }
+
   Future<void> _saveAddressToFirestore(DeliveryAddress address) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
-    
+
     await _firestore
         .collection('users')
         .doc(user.uid)
@@ -309,7 +350,7 @@ class DeliveryProvider extends ChangeNotifier {
   Future<void> _updateAddressInFirestore(DeliveryAddress address) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
-    
+
     await _firestore
         .collection('users')
         .doc(user.uid)
@@ -321,7 +362,7 @@ class DeliveryProvider extends ChangeNotifier {
   Future<void> _removeAddressFromFirestore(String addressId) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
-    
+
     await _firestore
         .collection('users')
         .doc(user.uid)
@@ -330,10 +371,11 @@ class DeliveryProvider extends ChangeNotifier {
         .delete();
   }
 
-  Future<void> _saveRouteOptimizationToFirestore(RouteOptimization route) async {
+  Future<void> _saveRouteOptimizationToFirestore(
+      RouteOptimization route) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
-    
+
     await _firestore
         .collection('users')
         .doc(user.uid)
@@ -345,12 +387,21 @@ class DeliveryProvider extends ChangeNotifier {
   Future<void> _removeRouteOptimizationFromFirestore(String routeId) async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('User not authenticated');
-    
+
     await _firestore
         .collection('users')
         .doc(user.uid)
         .collection('routeOptimizations')
         .doc(routeId)
         .delete();
+  }
+
+  void removeAssignedOrderLocally(String orderId) {
+    _assignedOrders.removeWhere((order) => order['id'] == orderId);
+    notifyListeners();
+  }
+
+  Future<void> refreshAssignedOrders() async {
+    await _loadAssignedOrders();
   }
 }
