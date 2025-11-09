@@ -83,3 +83,15 @@ lib/generated_plugin_registrant.dart
 
 # Exceptions to above rules.
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
+
+# --- Secrets (never commit) ---
+*.env
+.env.*
+*serviceAccount*.json
+*.credentials.json
+*.key.json
+*.p8
+firebase-*.json
+google-services.json
+GoogleService-Info.plist
+secrets/
