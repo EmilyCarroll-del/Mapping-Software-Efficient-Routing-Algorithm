@@ -3,6 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
+/// Web (admin) helper for FCM token management (optional) and
+/// creating exactly ONE Firestore notification per message sent.
+/// Mobile reads these docs to render the in-app card and deep-link.
+///
+/// IMPORTANT:
+/// - Only the SENDER should call createChatNotificationForRecipient.
+/// - We use a deterministic document id to prevent duplicates.
 class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
@@ -26,6 +33,7 @@ class NotificationService {
     await _requestPermission();
 
     final token = await _messaging.getToken(
+      // Your Web push key (ok to be public in client apps)
       vapidKey:
       "BAEXeAwTaHrsEDu5-we5yu9YAnnOaEvKqF8s_dM_J2WJbp-9T2YoL54DRa2T61LBSjbHgBSNU3Xh2KmPvoS1ILs",
     );
@@ -53,7 +61,6 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final data = message.data;
       final type = data['type'];
-
       if (type == 'ADMIN_MESSAGE') {
         final from = data['from'] ?? 'Admin';
         final body = data['body'] ?? '';
@@ -88,7 +95,7 @@ class NotificationService {
     await FirebaseFirestore.instance.collection('users').doc(userId).set({
       'role': role,
       'fcmToken': token,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'fcmTokenUpdatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
     debugPrint("✅ FCM token saved in Firestore for $userId ($role)");
@@ -102,40 +109,55 @@ class NotificationService {
     required String conversationId,    // chat id
     required String senderUserId,      // current admin uid
     required String senderName,        // display name shown in title
-    required String messageId,         // the message doc id just created
+    required String messageId,         // message doc id just created
     required String messageText,       // text (or caption)
     String messageType = 'text',       // 'text' | 'image'
-    bool isOldFormat = false,          // <-- mark true for 'chats' collection
+    bool isOldFormat = false,          // true for 'chats' collection
   }) async {
     try {
-      final preview = (messageType == 'image')
-          ? '📷 Photo'
-          : (messageText.length > 120
-          ? '${messageText.substring(0, 120)}…'
-          : messageText);
+      // Build a clean preview
+      String preview;
+      if (messageType == 'image') {
+        preview = '📷 Photo';
+      } else {
+        final trimmed = messageText.trim();
+        if (trimmed.isEmpty) {
+          preview = 'New message';
+        } else {
+          preview = trimmed.length > 120 ? '${trimmed.substring(0, 120)}…' : trimmed;
+        }
+      }
 
-      final ref =
-      await FirebaseFirestore.instance.collection('notifications').add({
+      // Deterministic doc id prevents duplicates if called twice
+      final docId = 'msg_${messageId}_$recipientUserId';
+
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(docId)
+          .set({
         'userId': recipientUserId,
         'type': 'message',
         'title': 'New message from $senderName',
         'message': preview,
         'timestamp': FieldValue.serverTimestamp(),
         'isRead': false,
+
         'actionType': 'open_chat',
         'actionData': {
           'conversationId': conversationId,
           'otherUserId': senderUserId,
-          'isOldFormat': isOldFormat,   // <-- mobile will read this
+          'isOldFormat': isOldFormat, // mobile reads this to route to /chats
         },
+
         'metadata': {
           'senderName': senderName,
           'senderId': senderUserId,
           'messageId': messageId,
+          'messageType': messageType,
         },
-      });
+      }, SetOptions(merge: false));
 
-      debugPrint('🔔 created chat notification ${ref.id} → '
+      debugPrint('🔔 notification $docId → '
           'recipient=$recipientUserId convo=$conversationId old=$isOldFormat');
     } catch (e) {
       debugPrint('❌ failed to create chat notification: $e');

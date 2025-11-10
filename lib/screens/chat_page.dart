@@ -1,9 +1,8 @@
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../services/notification_service.dart'; // <-- added
+import '../services/notification_service.dart';
 
 class ChatPage extends StatefulWidget {
   final String chatId;
@@ -32,49 +31,48 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty) return;
-    if (currentUser == null) return; // Should not happen if they are on this screen
+    final text = _messageController.text.trim();
+    if (text.isEmpty || currentUser == null) return;
 
-    final messageText = _messageController.text.trim();
     final db = FirebaseFirestore.instance;
 
-    // 1) add the message
+    // 1) write message
     final msgRef = await db
         .collection('chats')
         .doc(widget.chatId)
         .collection('messages')
         .add({
-      'message': messageText,
+      'message': text,
       'senderId': currentUser!.uid,
       'timestamp': FieldValue.serverTimestamp(),
     });
 
-    // 2) update parent chat summary
+    // 2) update chat summary
     await db.collection('chats').doc(widget.chatId).update({
-      'lastMessage': messageText,
+      'lastMessage': text,
       'lastMessageTime': FieldValue.serverTimestamp(),
     });
 
-    // 3) figure out the recipient (other participant)
+    // 3) find recipient
     final chatSnap = await db.collection('chats').doc(widget.chatId).get();
-    final chatData = chatSnap.data() as Map<String, dynamic>? ?? {};
-    final users = List<String>.from(chatData['users'] ?? const []);
-    final recipientId = users.firstWhere(
-          (u) => u != currentUser!.uid,
-      orElse: () => '',
-    );
+    final users = List<String>.from((chatSnap.data() ?? const {})['users'] ?? const []);
+    final recipientId = users.firstWhere((u) => u != currentUser!.uid, orElse: () => '');
 
-    // 4) create the recipient's in-app notification so MOBILE sees it
+    // 4) write ONE recipient notification (deterministic id prevents dupes)
     if (recipientId.isNotEmpty) {
+      final senderName = (currentUser!.displayName?.trim().isNotEmpty ?? false)
+          ? currentUser!.displayName!.trim()
+          : (currentUser!.email ?? 'User');
+
       await NotificationService.instance.createChatNotificationForRecipient(
         recipientUserId: recipientId,
-        conversationId: widget.chatId,         // we’ll flag this as old format
+        conversationId: widget.chatId,
         senderUserId: currentUser!.uid,
-        senderName: currentUser!.email ?? 'Admin',
+        senderName: senderName,
         messageId: msgRef.id,
-        messageText: messageText,
+        messageText: text,
         messageType: 'text',
-        isOldFormat: true,                      // <-- IMPORTANT: chat uses old 'chats' collection
+        isOldFormat: true, // using /chats/*
       );
     }
 
@@ -97,9 +95,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.otherUserName),
-      ),
+      appBar: AppBar(title: Text(widget.otherUserName)),
       body: Column(
         children: [
           Expanded(
@@ -126,8 +122,7 @@ class _ChatPageState extends State<ChatPage> {
                   padding: const EdgeInsets.all(8.0),
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
-                    final message = messages[index];
-                    final data = message.data() as Map<String, dynamic>;
+                    final data = messages[index].data() as Map<String, dynamic>;
                     final bool isMe = data['senderId'] == currentUser?.uid;
 
                     return _buildMessageBubble(data['message'] ?? '', isMe);
