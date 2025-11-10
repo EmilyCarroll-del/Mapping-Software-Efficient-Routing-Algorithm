@@ -17,7 +17,7 @@ class FirestoreService {
         .where('userId', isEqualTo: userId)
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
+        snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
   }
 
   Stream<List<DeliveryAddress>> getUnassignedAddresses(String userId) {
@@ -27,7 +27,7 @@ class FirestoreService {
         .where('status', isEqualTo: 'pending')
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
+        snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
   }
 
   Future<void> saveAddress(DeliveryAddress address) {
@@ -53,7 +53,7 @@ class FirestoreService {
         .where('driverId', isEqualTo: driverId)
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
+        snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
   }
 
   Future<void> updateDeliveryStatus(String addressId, String status) {
@@ -76,7 +76,7 @@ class FirestoreService {
         .where('status', whereIn: ['assigned', 'accepted', 'in_progress', 'denied'])
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
+        snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
   }
 
   Future<void> reassignAddress(String addressId) {
@@ -84,6 +84,23 @@ class FirestoreService {
       'status': 'pending',
       'driverId': FieldValue.delete(),
     });
+  }
+
+  // ✅ NEW METHOD: Get completed deliveries for an admin
+  Stream<List<DeliveryAddress>> getCompletedAddressesForAdmin(String adminUid) {
+    return _db
+        .collection(_addressesCollectionPath)
+        .where('userId', isEqualTo: adminUid)
+        .where('status', isEqualTo: 'completed')
+    // .orderBy('createdAt', descending: true) // optional: uncomment if your collection has a createdAt field
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) {
+      final data = doc.data();
+      return DeliveryAddress.fromJson({
+        'id': doc.id,
+        ...data,
+      });
+    }).toList());
   }
 
   // USER & DRIVER METHODS
@@ -99,7 +116,7 @@ class FirestoreService {
         .where('role', whereIn: ['driver', 'Driver'])
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
+        snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
   }
 
   Stream<List<UserModel>> getFreelanceDrivers() {
@@ -109,7 +126,7 @@ class FirestoreService {
         .where('companyId', isEqualTo: null)
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
+        snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
   }
 
   Stream<List<UserModel>> getDriversByCompany(String companyId) {
@@ -119,7 +136,7 @@ class FirestoreService {
         .where('companyId', isEqualTo: companyId)
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
+        snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
   }
 
   Future<UserModel?> getUserById(String uid) async {
@@ -157,7 +174,6 @@ class FirestoreService {
     await batch.commit();
   }
 
-  // Unassign all addresses for a specific user
   Future<void> unassignAllAddresses(String userId) async {
     final addresses = await getAssignedAddresses(userId).first;
     final batch = _db.batch();
@@ -170,7 +186,6 @@ class FirestoreService {
     await batch.commit();
   }
 
-  // Assign an address to a driver
   Future<void> assignAddressToDriver(String addressId, String driverId) {
     return _db.collection(_addressesCollectionPath).doc(addressId).update({
       'driverId': driverId,
@@ -178,7 +193,7 @@ class FirestoreService {
     });
   }
 
-  // Get completed deliveries for a specific driver
+  // DRIVER COMPLETED ADDRESSES
   Stream<List<DeliveryAddress>> getDriverCompletedAddresses(String driverId) {
     return _db
         .collection(_addressesCollectionPath)
@@ -186,32 +201,32 @@ class FirestoreService {
         .where('status', isEqualTo: 'completed')
         .snapshots()
         .map((snapshot) =>
-            snapshot.docs.map((doc) {
-              final data = doc.data();
-              return DeliveryAddress.fromJson({
-                'id': doc.id,
-                ...data,
-              });
-            }).toList());
+        snapshot.docs.map((doc) {
+          final data = doc.data();
+          return DeliveryAddress.fromJson({
+            'id': doc.id,
+            ...data,
+          });
+        }).toList());
   }
 
-  // Get completed deliveries for multiple drivers
+  // ALL DRIVERS COMPLETED ADDRESSES
   Future<List<DeliveryAddress>> getAllDriversCompletedAddresses(List<String> driverIds) async {
     if (driverIds.isEmpty) return [];
 
     try {
       final List<DeliveryAddress> allAddresses = [];
-      
+
       final futures = driverIds.map((driverId) =>
-        _db
-            .collection(_addressesCollectionPath)
-            .where('driverId', isEqualTo: driverId)
-            .where('status', isEqualTo: 'completed')
-            .get()
+          _db
+              .collection(_addressesCollectionPath)
+              .where('driverId', isEqualTo: driverId)
+              .where('status', isEqualTo: 'completed')
+              .get()
       );
 
       final results = await Future.wait(futures);
-      
+
       for (final snapshot in results) {
         for (final doc in snapshot.docs) {
           final data = doc.data();
@@ -244,7 +259,7 @@ class FirestoreService {
         .snapshots()
         .map((snapshot) {
       final orders =
-          snapshot.docs.map((doc) => OrderModel.fromJson(doc.data())).toList();
+      snapshot.docs.map((doc) => OrderModel.fromJson(doc.data())).toList();
       orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return orders;
     });
@@ -258,7 +273,7 @@ class FirestoreService {
   }) async {
     final reservedPickUp = pickUpAddress.copyWith(status: 'reserved');
     final reservedDropOffs =
-        dropOffAddresses.map((a) => a.copyWith(status: 'reserved')).toList();
+    dropOffAddresses.map((a) => a.copyWith(status: 'reserved')).toList();
 
     final order = OrderModel(
       orderId: orderId,
