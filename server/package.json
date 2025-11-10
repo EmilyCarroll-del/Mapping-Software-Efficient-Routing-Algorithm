@@ -1,0 +1,13 @@
+{
+  "name": "graph-go-notifier",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.cjs",
+  "scripts": {
+    "start": "node index.cjs"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "firebase-admin": "^12.7.0"
+  }
+}
