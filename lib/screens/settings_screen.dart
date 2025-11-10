@@ -35,34 +35,6 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (authProvider.user != null)
-            Card(
-              color: cardBackgroundColor,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Profile',
-                      style: currentTheme.textTheme.titleLarge?.copyWith(color: primaryTextColor),
-                    ),
-                    const SizedBox(height: 16),
-                    FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance.collection('users').doc(authProvider.user!.uid).get(),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
-                          return Text('Name: ${snapshot.data!['name']}', style: TextStyle(color: primaryTextColor));
-                        }
-                        return Text('Loading...', style: TextStyle(color: primaryTextColor));
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          if (authProvider.user != null)
-            const SizedBox(height: 16),
           Card(
             color: cardBackgroundColor,
             child: Padding(

@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 
 import '../providers/settings_provider.dart';
 import '../services/google_auth_service.dart';
+import '../services/profile_service.dart';
+import '../services/user_profile_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -47,11 +49,31 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       final user = FirebaseAuth.instance.currentUser;
-      if (user != null && _selectedRole != 'Admin') {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set({'role': _selectedRole}, SetOptions(merge: true));
+      if (user != null) {
+        final profileService = ProfileService();
+        final userType = _selectedRole.toLowerCase(); // 'admin' or 'driver'
+        
+        final profileExists = await profileService.profileExists(user.uid, userType);
+        if (profileExists) {
+          await profileService.updateProfile(
+            user.uid,
+            userType,
+            {'role': _selectedRole},
+          );
+        } else {
+          await profileService.createProfile(
+            user.uid,
+            userType,
+            {
+              'email': user.email ?? '',
+              'provider': 'email',
+              'userType': userType,
+              'role': _selectedRole,
+            },
+          );
+        }
+        
+        await UserProfileService.updateOnSignIn(context, inferredRole: _selectedRole);
       }
 
       _navigateBasedOnRole(_selectedRole);
@@ -75,11 +97,36 @@ class _LoginPageState extends State<LoginPage> {
       await GoogleAuthService.signInWithGoogle();
       final user = FirebaseAuth.instance.currentUser;
 
-      if (user != null && _selectedRole != 'Admin') {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .set({'role': _selectedRole}, SetOptions(merge: true));
+      if (user != null) {
+        final profileService = ProfileService();
+        final userType = _selectedRole.toLowerCase();
+
+        final profileExists = await profileService.profileExists(user.uid, userType);
+        if (profileExists) {
+          await profileService.updateProfile(
+            user.uid,
+            userType,
+            {'role': _selectedRole},
+          );
+        } else {
+          await profileService.createProfile(
+            user.uid,
+            userType,
+            {
+              'email': user.email ?? '',
+              'provider': 'google',
+              'userType': userType,
+              'role': _selectedRole,
+              'first_name': user.displayName?.split(' ').first ?? '',
+              'last_name': user.displayName?.split(' ').skip(1).join(' ') ?? '',
+              'name': user.displayName ?? '',
+              'photo_url': user.photoURL,
+            },
+          );
+        }
+
+        await UserProfileService.updateOnSignIn(context, inferredRole: _selectedRole);
+
         _navigateBasedOnRole(_selectedRole);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

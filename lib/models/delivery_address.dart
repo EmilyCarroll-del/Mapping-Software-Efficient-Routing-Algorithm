@@ -1,4 +1,3 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 
@@ -46,24 +45,31 @@ class DeliveryAddress {
     'latitude': latitude,
     'longitude': longitude,
     'notes': notes,
-    'createdAt': createdAt,
+    'createdAt': createdAt.toIso8601String(),
     'driverId': driverId,
     'status': status,
   };
 
   factory DeliveryAddress.fromJson(Map<String, dynamic> json) {
+    DateTime? createdAt;
+    if (json['createdAt'] is Timestamp) {
+      createdAt = (json['createdAt'] as Timestamp).toDate();
+    } else if (json['createdAt'] is String) {
+      createdAt = DateTime.tryParse(json['createdAt']);
+    }
+
     return DeliveryAddress(
       id: json['id'],
-      userId: json['userId'],
-      streetAddress: json['streetAddress'],
-      city: json['city'],
-      state: json['state'],
-      zipCode: json['zipCode'],
-      latitude: json['latitude']?.toDouble(),
-      longitude: json['longitude']?.toDouble(),
-      notes: json['notes'],
-      createdAt: (json['createdAt'] as Timestamp).toDate(),
-      driverId: json['driverId'],
+      userId: json['userId'] ?? '',
+      streetAddress: (json['streetAddress'] ?? '').toString(),
+      city: (json['city'] ?? '').toString(),
+      state: (json['state'] ?? '').toString(),
+      zipCode: (json['zipCode'] ?? '').toString(),
+      latitude: json['latitude'] == null ? null : (json['latitude'] as num).toDouble(),
+      longitude: json['longitude'] == null ? null : (json['longitude'] as num).toDouble(),
+      notes: json['notes']?.toString(),
+      createdAt: createdAt ?? DateTime.now(),
+      driverId: json['driverId']?.toString(),
       status: json['status'] ?? 'pending',
     );
   }

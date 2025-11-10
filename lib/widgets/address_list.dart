@@ -24,13 +24,20 @@ class AddressList extends StatefulWidget {
   });
 
   @override
-  _AddressListState createState() => _AddressListState();
+  AddressListState createState() => AddressListState();
 }
 
-class _AddressListState extends State<AddressList> {
+class AddressListState extends State<AddressList> {
   Set<String> _selectedAddressIds = {};
   List<DeliveryAddress> _availableAddresses = [];
   bool _isSelectAll = false;
+
+  void clearSelection() {
+    setState(() {
+      _selectedAddressIds.clear();
+      _isSelectAll = false;
+    });
+  }
 
   void _handleAddressSelection(String addressId, bool isSelected) {
     setState(() {
@@ -129,14 +136,6 @@ class _AddressListState extends State<AddressList> {
 
         return CustomScrollView(
           slivers: [
-            if (widget.showSectionHeaders && _availableAddresses.isNotEmpty) ...[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                  child: Text('Available Addresses', style: Theme.of(context).textTheme.titleLarge),
-                ),
-              ),
-            ],
             if (_availableAddresses.isNotEmpty && !widget.isReadOnly)
               SliverToBoxAdapter(
                 child: Padding(

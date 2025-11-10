@@ -33,6 +33,7 @@ class DriversList extends StatelessWidget {
           itemBuilder: (context, index) {
             final driver = drivers[index];
 
+            // Display the part of the email before the @ symbol.
             final String displayTitle = driver.email?.split('@').first ?? 'N/A';
 
             final role = driver.role ?? 'driver';

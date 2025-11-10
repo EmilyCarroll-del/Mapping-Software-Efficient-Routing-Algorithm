@@ -5,14 +5,34 @@ import '../models/order_model.dart';
 import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../services/firestore_service.dart';
+import '../services/profile_service.dart';
 
 class ViewOrdersScreen extends StatelessWidget {
   const ViewOrdersScreen({super.key});
 
   void _showAssignDriverDialog(BuildContext context, OrderModel order) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final user = authProvider.user;
+    if (user == null) return;
+
+    final profileService = Provider.of<ProfileService>(context, listen: false);
+
     showDialog(
       context: context,
-      builder: (context) => AssignDriverDialog(order: order),
+      builder: (context) {
+        return FutureBuilder<Map<String, dynamic>?>(
+          future: profileService.getProfile(user.uid, 'admin'),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final companyId = snapshot.data?['companyId'] as String?;
+
+            return AssignDriverDialog(order: order, companyId: companyId);
+          },
+        );
+      },
     );
   }
 
@@ -159,8 +179,9 @@ class ViewOrdersScreen extends StatelessWidget {
 
 class AssignDriverDialog extends StatefulWidget {
   final OrderModel order;
+  final String? companyId;
 
-  const AssignDriverDialog({super.key, required this.order});
+  const AssignDriverDialog({super.key, required this.order, this.companyId});
 
   @override
   State<AssignDriverDialog> createState() => _AssignDriverDialogState();
@@ -186,7 +207,9 @@ class _AssignDriverDialogState extends State<AssignDriverDialog> {
         width: 400,
         height: 350,
         child: StreamBuilder<List<UserModel>>(
-          stream: firestoreService.getDrivers(),
+          stream: widget.companyId != null && widget.companyId!.isNotEmpty
+              ? firestoreService.getDriversByCompany(widget.companyId!)
+              : firestoreService.getFreelanceDrivers(),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());

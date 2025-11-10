@@ -1,10 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
+import 'package:graph_go/services/notification_service.dart' as notif_service;
 import '../providers/auth_provider.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Delay reading the provider until after the first frame so context is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      if (authProvider.user != null) {
+        // hardcode driver id for now as in the instructions
+        notif_service.NotificationService.instance.initForDriver(authProvider.user!.uid);
+      }
+    });
+  }
 
   void _handleLogout(BuildContext context) {
     showGeneralDialog(
@@ -128,8 +147,8 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<SettingsProvider, AuthProvider>(
-      builder: (context, settings, auth, child) {
+    return Consumer<SettingsProvider>(
+      builder: (context, settings, child) {
         final bool darkMode = settings.darkMode;
         final ThemeData currentTheme = Theme.of(context);
 
@@ -151,12 +170,10 @@ class HomeScreen extends StatelessWidget {
               icon: const Icon(Icons.settings, color: Colors.white),
               onPressed: () => Navigator.of(context).pushNamed('/settings'),
             ),
-            title: Consumer<AuthProvider>(builder: (context, auth, child) {
-              return Text(
-                'Welcome, ${auth.user?.displayName ?? 'Guest'}',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-              );
-            }),
+            title: const Text(
+              'GraphGo',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            ),
             centerTitle: true,
             actions: [
               if (settings.isLoggedIn)

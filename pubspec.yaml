@@ -19,13 +19,16 @@ dependencies:
   shared_preferences: ^2.2.3
 
   # ✅ Firebase + Auth + Firestore + Storage
-  firebase_core:
-  firebase_auth:
-  cloud_firestore:
-  firebase_storage:
+  firebase_core: ^4.2.0
+  firebase_auth: ^6.1.1
+  cloud_firestore: ^6.0.3
+  firebase_storage: ^13.0.3
+
+  # ✅ Push notifications
+  firebase_messaging: ^16.0.3
 
   # ✅ Maps + Location
-  google_maps_flutter: ^2.6.1
+  google_maps_flutter: ^2.5.0
   location: ^5.0.3
   geocoding: ^2.1.1
 

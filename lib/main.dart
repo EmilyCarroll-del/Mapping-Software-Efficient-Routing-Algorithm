@@ -11,6 +11,7 @@ import 'providers/settings_provider.dart';
 import 'providers/delivery_provider.dart';
 import 'providers/auth_provider.dart';
 import 'services/firestore_service.dart';
+import 'services/profile_service.dart'; // Import the ProfileService
 
 // Screens
 import 'screens/add_order_screen.dart';
@@ -25,6 +26,9 @@ import 'screens/admin_dashboard_screen.dart';
 import 'screens/assigned_addresses_screen.dart';
 import 'screens/driver_assignments_screen.dart';
 import 'screens/view_orders_screen.dart';
+import 'screens/my_drivers_screen.dart';
+import 'screens/admin_route_history_screen.dart';
+import 'screens/active_codes_screen.dart';
 
 const String googleApiKey = "AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74";
 
@@ -49,6 +53,7 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         Provider<FirestoreService>(create: (_) => FirestoreService()),
+        Provider<ProfileService>(create: (_) => ProfileService()), // Add ProfileService here
         ChangeNotifierProvider(create: (_) => GraphProvider()),
         ChangeNotifierProvider(create: (_) => DeliveryProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
@@ -99,6 +104,9 @@ class MyApp extends StatelessWidget {
               "/assigned-addresses": (context) => AssignedAddressesScreen(),
               "/driver-assignments": (context) => const DriverAssignmentsScreen(),
               "/view-orders": (context) => const ViewOrdersScreen(),
+              "/my-drivers": (context) => const MyDriversScreen(),
+              "/admin-route-history": (context) => const AdminRouteHistoryScreen(),
+              "/active-codes": (context) => const ActiveCodesScreen(),
             },
           );
         },

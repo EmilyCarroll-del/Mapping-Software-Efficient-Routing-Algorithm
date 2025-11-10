@@ -102,6 +102,26 @@ class FirestoreService {
             snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
   }
 
+  Stream<List<UserModel>> getFreelanceDrivers() {
+    return _db
+        .collection(_usersCollectionPath)
+        .where('role', whereIn: ['driver', 'Driver'])
+        .where('companyId', isEqualTo: null)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
+  }
+
+  Stream<List<UserModel>> getDriversByCompany(String companyId) {
+    return _db
+        .collection(_usersCollectionPath)
+        .where('role', whereIn: ['driver', 'Driver'])
+        .where('companyId', isEqualTo: companyId)
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
+  }
+
   Future<UserModel?> getUserById(String uid) async {
     final doc = await _db.collection(_usersCollectionPath).doc(uid).get();
     if (doc.exists) {
@@ -135,6 +155,84 @@ class FirestoreService {
     }
 
     await batch.commit();
+  }
+
+  // Unassign all addresses for a specific user
+  Future<void> unassignAllAddresses(String userId) async {
+    final addresses = await getAssignedAddresses(userId).first;
+    final batch = _db.batch();
+
+    for (final address in addresses) {
+      final docRef = _db.collection(_addressesCollectionPath).doc(address.id);
+      batch.update(docRef, {'driverId': FieldValue.delete(), 'status': 'pending'});
+    }
+
+    await batch.commit();
+  }
+
+  // Assign an address to a driver
+  Future<void> assignAddressToDriver(String addressId, String driverId) {
+    return _db.collection(_addressesCollectionPath).doc(addressId).update({
+      'driverId': driverId,
+      'status': 'assigned',
+    });
+  }
+
+  // Get completed deliveries for a specific driver
+  Stream<List<DeliveryAddress>> getDriverCompletedAddresses(String driverId) {
+    return _db
+        .collection(_addressesCollectionPath)
+        .where('driverId', isEqualTo: driverId)
+        .where('status', isEqualTo: 'completed')
+        .snapshots()
+        .map((snapshot) =>
+            snapshot.docs.map((doc) {
+              final data = doc.data();
+              return DeliveryAddress.fromJson({
+                'id': doc.id,
+                ...data,
+              });
+            }).toList());
+  }
+
+  // Get completed deliveries for multiple drivers
+  Future<List<DeliveryAddress>> getAllDriversCompletedAddresses(List<String> driverIds) async {
+    if (driverIds.isEmpty) return [];
+
+    try {
+      final List<DeliveryAddress> allAddresses = [];
+      
+      final futures = driverIds.map((driverId) =>
+        _db
+            .collection(_addressesCollectionPath)
+            .where('driverId', isEqualTo: driverId)
+            .where('status', isEqualTo: 'completed')
+            .get()
+      );
+
+      final results = await Future.wait(futures);
+      
+      for (final snapshot in results) {
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          try {
+            allAddresses.add(DeliveryAddress.fromJson({
+              'id': doc.id,
+              ...data,
+            }));
+          } catch (e) {
+            print('Error parsing address ${doc.id}: $e');
+          }
+        }
+      }
+
+      allAddresses.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      return allAddresses;
+    } catch (e) {
+      print('Error fetching completed addresses: $e');
+      return [];
+    }
   }
 
   // ORDER METHODS

@@ -66,8 +66,12 @@ class _AssignDriversDialogState extends State<AssignDriversDialog> {
                 itemBuilder: (context, index) {
                   final driver = widget.drivers[index];
                   final isSelected = _selectedDriverIds.contains(driver.uid);
+
+                  // Display the driver's email, falling back to UID if email is null
+                  final String displayName = driver.email ?? driver.uid;
+
                   return CheckboxListTile(
-                    title: Text(driver.displayName ?? driver.email ?? driver.uid),
+                    title: Text(displayName),
                     value: isSelected,
                     onChanged: (bool? value) {
                       if (value != null) {
