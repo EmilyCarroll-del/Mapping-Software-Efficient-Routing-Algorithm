@@ -13,6 +13,7 @@ class NotificationService {
   NotificationService([this.navigatorKey]);
 
   // Used to navigate when a push notification is tapped.
+  // May be null if caller doesn't care about routing.
   final GlobalKey<NavigatorState>? navigatorKey;
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -38,7 +39,9 @@ class NotificationService {
     _currentUserId = user.uid;
 
     try {
+      // -----------------------------
       // 1) Ask permission + save FCM token
+      // -----------------------------
       final settings = await _messaging.requestPermission(
         alert: true,
         badge: true,
@@ -48,7 +51,6 @@ class NotificationService {
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
         final token = await _messaging.getToken();
         if (token != null) {
-          debugPrint('📱 DRIVER FCM token: $token');
           await _saveFCMToken(user.uid, token);
         }
 
@@ -59,16 +61,20 @@ class NotificationService {
         debugPrint('🔕 Notifications permission not granted');
       }
 
+      // -----------------------------
       // 2) FCM listeners
+      // -----------------------------
       FirebaseMessaging.onMessage.listen((msg) {
         debugPrint('📩 onMessage (foreground): ${msg.data}');
       });
 
+      // App brought to foreground via tap
       FirebaseMessaging.onMessageOpenedApp.listen((msg) {
         debugPrint('➡️ onMessageOpenedApp: ${msg.data}');
         _handleNotificationTap(msg);
       });
 
+      // App launched from terminated via tap
       final initialMessage = await _messaging.getInitialMessage();
       if (initialMessage != null) {
         debugPrint(
@@ -77,7 +83,9 @@ class NotificationService {
         _handleNotificationTap(initialMessage);
       }
 
+      // -----------------------------
       // 3) Orders listener (driver-only)
+      // -----------------------------
       await _setupOrderListeners();
 
       _isInitialized = true;
@@ -180,7 +188,8 @@ class NotificationService {
   }
 
   /// Creates a single, de-duplicated order notification by writing to a
-  /// deterministic document ID.
+  /// deterministic document ID. If the same (user, orderId, status) shows up
+  /// again, it won’t create extra rows/cards.
   Future<void> _createOrderNotification({
     required String orderId,
     required String address,
@@ -208,6 +217,7 @@ class NotificationService {
       body = 'Order update: $address';
     }
 
+    // Deterministic doc id = order_<userId>_<orderId>_<status>
     final id = 'order_${user.uid}_${orderId}_${currentStatus}';
 
     await _createNotificationWithId(
@@ -225,6 +235,7 @@ class NotificationService {
     );
   }
 
+  /// Generic helper when you want to force a stable ID (prevents duplicates).
   Future<void> _createNotificationWithId({
     required String id,
     required String userId,
@@ -236,23 +247,27 @@ class NotificationService {
     Map<String, dynamic>? metadata,
   }) async {
     try {
-      await _db.collection('notifications').doc(id).set({
-        'userId': userId,
-        'type': type, // 'order' | 'message' | 'system' | 'news'
-        'title': title,
-        'message': message,
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-        'actionType': actionType, // 'view_order' | 'open_chat' | 'none'
-        'actionData': actionData ?? <String, dynamic>{},
-        'metadata': metadata ?? <String, dynamic>{},
-      }, SetOptions(merge: false));
+      await _db.collection('notifications').doc(id).set(
+        {
+          'userId': userId,
+          'type': type, // 'order' | 'message' | 'system' | 'news'
+          'title': title,
+          'message': message,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+          'actionType': actionType, // 'view_order' | 'open_chat' | 'none'
+          'actionData': actionData ?? <String, dynamic>{},
+          'metadata': metadata ?? <String, dynamic>{},
+        },
+        SetOptions(merge: false), // overwrite if same id shows up again
+      );
     } catch (e) {
       debugPrint('❌ Error creating notification (with id): $e');
     }
   }
 
   /// Generic helper when de-duplication is not required.
+  /// TIP: for chat, pass metadata: {'senderName': '<display name>', 'senderId': '<uid>'}
   Future<void> createNotification({
     required String userId,
     required String type,
@@ -350,48 +365,63 @@ class NotificationService {
     }
 
     final data = message.data;
-    final typeRaw = data['type']?.toString() ?? '';
-    final type = typeRaw.toUpperCase();
 
-    debugPrint('🔔 Handling notification tap type=$type data=$data');
+    // type is something like: "chat", "order", "assigned_orders", "inbox", etc.
+    final String type = (data['type'] as String?) ?? 'chat';
 
-    // CHAT from Node notifier: type = "CHAT_MESSAGE"
-    if (type == 'CHAT' || type == 'CHAT_MESSAGE') {
-      final conversationId =
-      (data['conversationId'] ?? data['chatId'])?.toString();
-      final otherUserId =
-      (data['otherUserId'] ?? data['senderId'])?.toString();
+    // Be tolerant of different key names coming from the server:
+    final Object? convoRaw =
+        data['conversationId'] ?? data['chatId'] ?? data['convo'] ?? data['convoId'];
+    final String? conversationId = convoRaw?.toString();
 
-      final otherUserName = (data['otherUserName'] ??
-          data['senderName'] ??
-          data['title'] ??
-          'User')
-          .toString();
+    // otherUserId: preferably explicit, otherwise fallback to senderId.
+    String? otherUserId = data['otherUserId']?.toString();
+    otherUserId ??= data['senderId']?.toString();
+    otherUserId ??= data['fromUserId']?.toString();
 
+    final String otherUserName =
+        (data['otherUserName'] as String?) ??
+            (data['senderName'] as String?) ??
+            'User';
+
+    final String? orderId = data['orderId']?.toString();
+    final String? orderTitle = data['orderTitle']?.toString();
+
+    final bool isOldFormat =
+    _parseBool(data['isOldFormat'] ?? data['oldFormat'] ?? false);
+
+    debugPrint(
+      '🔔 Handling notification tap: '
+          'type=$type, conversationId=$conversationId, otherUserId=$otherUserId, '
+          'orderId=$orderId, data=$data',
+    );
+
+    if (type == 'chat') {
       if (conversationId == null || otherUserId == null) {
         debugPrint(
-          '⚠️ Missing conversationId or otherUserId in chat notification; going to inbox instead.',
+          '⚠️ Missing conversationId/otherUserId for chat push; sending user to Inbox instead.',
         );
         ctx.go('/inbox');
         return;
       }
 
-      final extras = <String, dynamic>{
-        'conversationId': conversationId,
-        'otherUserId': otherUserId,
-        'otherUserName': otherUserName,
-        'orderId': data['orderId']?.toString(),
-        'orderTitle': data['orderTitle']?.toString(),
-        'isOldFormat': _parseBool(data['isOldFormat']),
-      };
-
-      ctx.go('/chat', extra: extras);
-    } else if (type == 'ASSIGNED_ORDERS' || type == 'ORDER') {
+      ctx.go(
+        '/chat',
+        extra: <String, dynamic>{
+          'conversationId': conversationId,
+          'otherUserId': otherUserId,
+          'otherUserName': otherUserName,
+          'orderId': orderId,
+          'orderTitle': orderTitle,
+          'isOldFormat': isOldFormat,
+        },
+      );
+    } else if (type == 'assigned_orders' || type == 'order') {
       ctx.go('/assigned-orders');
-    } else if (type == 'INBOX') {
+    } else if (type == 'inbox') {
       ctx.go('/inbox');
     } else {
-      // Fallback: notifications screen
+      // Fallback: app notifications screen
       ctx.go('/notifications');
     }
   }
