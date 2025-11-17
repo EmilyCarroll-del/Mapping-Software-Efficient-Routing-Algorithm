@@ -1,11 +1,9 @@
-import 'dart:async';
-import 'dart:math';
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models/order.dart' as app_order;
 import '../models/route_optimization.dart';
 import '../models/delivery_address.dart';
@@ -27,6 +25,7 @@ class _DriverAssignedOrdersScreenState
     extends State<DriverAssignedOrdersScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ChatService _chatService = ChatService();
+  final AWSRouteService _awsRouteService = AWSRouteService();
   User? _currentUser;
 
   StreamSubscription? _addressesSubscription;
@@ -35,10 +34,20 @@ class _DriverAssignedOrdersScreenState
   List<app_order.Order> _addressDocs = [];
   List<app_order.Order> _orderDocs = [];
 
+  final DeliveryAddress _currentEmulatorLocation = DeliveryAddress(
+    streetAddress: 'Hofstra University',
+    city: 'Hempstead',
+    state: 'NY',
+    zipCode: '11549',
+    latitude: 40.7143,
+    longitude: -73.5994,
+  );
+
   @override
   void initState() {
     super.initState();
     _currentUser = FirebaseAuth.instance.currentUser;
+    _awsRouteService.initialize();
     FirebaseAuth.instance.authStateChanges().listen((user) {
       if (mounted) {
         setState(() {
@@ -58,10 +67,8 @@ class _DriverAssignedOrdersScreenState
   }
 
   void _listenToStreams() {
-    _cancelSubscriptions(); // Cancel any existing subscriptions
-
+    _cancelSubscriptions();
     final statuses = ['assigned', 'accepted', 'in_progress'];
-
     _addressesSubscription = _firestore
         .collection('addresses')
         .where('driverId', isEqualTo: _currentUser!.uid)
@@ -73,7 +80,6 @@ class _DriverAssignedOrdersScreenState
           .toList();
       _combineAndSort();
     });
-
     _ordersSubscription = _firestore
         .collection('orders')
         .where('driverIds', arrayContains: _currentUser!.uid)
@@ -112,11 +118,9 @@ class _DriverAssignedOrdersScreenState
     if (_currentUser == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Assigned Orders')),
-        body:
-            const Center(child: Text('Please log in to view assigned orders.')),
+        body: const Center(child: Text('Please log in to view assigned orders.')),
       );
     }
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Assigned Orders'),
@@ -130,11 +134,9 @@ class _DriverAssignedOrdersScreenState
               !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
           }
-
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
             return const Center(
               child: Column(
@@ -151,9 +153,7 @@ class _DriverAssignedOrdersScreenState
               ),
             );
           }
-
           final orders = snapshot.data!;
-
           return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: orders.length,
@@ -173,359 +173,250 @@ class _DriverAssignedOrdersScreenState
 
   Widget _buildOrderCard(app_order.Order order) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(order.status),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    order.status.toUpperCase(),
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Text(
-                  DateFormat('MM/dd/yyyy').format(order.createdAt),
-                  style: const TextStyle(color: Colors.grey, fontSize: 12),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text('Order ID: ${order.id}',
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 12),
-            const Text('PICKUP',
-                style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(
-              order.pickupAddress.fullAddress,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            if (order.pickupAddress.notes != null &&
-                order.pickupAddress.notes!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.note, size: 16, color: Colors.grey),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      order.pickupAddress.notes!,
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 16),
-            if (order.status == 'assigned')
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _acceptOrder(order),
-                      icon: const Icon(Icons.check),
-                      label: const Text('Accept'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _denyOrder(order),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Deny'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else if (order.status == 'accepted' ||
-                order.status == 'in_progress')
-              Column(
+        margin: const EdgeInsets.only(bottom: 16),
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (order.dropOffAddresses.isNotEmpty) ...[
-                    const Divider(height: 24),
-                    const Text('DROP-OFFS',
-                        style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold)),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                            color: _getStatusColor(order.status),
+                            borderRadius: BorderRadius.circular(20)),
+                        child: Text(order.status.toUpperCase(),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold))),
+                    Text(DateFormat('MM/dd/yyyy').format(order.createdAt),
+                        style: const TextStyle(
+                            color: Colors.grey, fontSize: 12))
+                  ]),
+                  const SizedBox(height: 12),
+                  Text('Order ID: ${order.id}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 12),
+                  const Text('PICKUP',
+                      style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(order.pickupAddress.fullAddress,
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w600)),
+                  if (order.pickupAddress.notes != null &&
+                      order.pickupAddress.notes!.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    ...order.dropOffAddresses.map((address) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(address.fullAddress,
-                                  style: const TextStyle(fontSize: 16)),
-                              if (address.notes != null &&
-                                  address.notes!.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.note,
-                                        size: 16, color: Colors.grey),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(
-                                        address.notes!,
-                                        style: const TextStyle(
-                                            color: Colors.grey, fontSize: 14),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ]
-                            ],
-                          ),
-                        )),
-                  ],
-                  if (order.notes != null && order.notes!.isNotEmpty) ...[
-                    const Divider(height: 24),
-                    const Text('GENERAL NOTES',
-                        style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(order.notes!, style: const TextStyle(fontSize: 16)),
+                    Row(children: [
+                      const Icon(Icons.note, size: 16, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Expanded(
+                          child: Text(order.pickupAddress.notes!,
+                              style: const TextStyle(color: Colors.grey)))
+                    ])
                   ],
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
+                  if (order.status == 'assigned')
+                    Row(children: [
                       Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _openChatForOrder(order),
-                          icon: const Icon(Icons.chat, size: 18),
-                          label: const Text('Chat'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ),
+                          child: ElevatedButton.icon(
+                              onPressed: () => _acceptOrder(order),
+                              icon: const Icon(Icons.check),
+                              label: const Text('Accept'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white))),
                       const SizedBox(width: 8),
                       Expanded(
-                        flex: 2,
-                        child: ElevatedButton(
-                          onPressed: () {
-                            print('🚀 START DELIVERY BUTTON CLICKED');
-                            print('Order ID: ${order.id}');
-                            print('Order Status: ${order.status}');
-                            print(
-                                'Order Source Collection: ${order.sourceCollection}');
-                            print(
-                                'Pickup Address: ${order.pickupAddress.fullAddress}');
-                            print(
-                                'Drop-off Addresses Count: ${order.dropOffAddresses.length}');
-                            try {
-                              _updateOrderStatus(order, order.status);
-                            } catch (e, stackTrace) {
-                              print('❌ ERROR in button handler: $e');
-                              print('Stack trace: $stackTrace');
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Error: ${e.toString()}'),
-                                    backgroundColor: Colors.red,
-                                    duration: const Duration(seconds: 5),
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                          child: Text(order.status == 'accepted'
-                              ? 'Start Delivery'
-                              : 'Mark as Completed'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
+                          child: ElevatedButton.icon(
+                              onPressed: () => _denyOrder(order),
+                              icon: const Icon(Icons.close),
+                              label: const Text('Deny'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Colors.white)))
+                    ])
+                  else if (order.status == 'accepted' ||
+                      order.status == 'in_progress')
+                    Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (order.dropOffAddresses.isNotEmpty) ...[
+                            const Divider(height: 24),
+                            const Text('DROP-OFFS',
+                                style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            ...order.dropOffAddresses.map((address) => Padding(
+                                padding:
+                                    const EdgeInsets.only(bottom: 12.0),
+                                child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(address.fullAddress,
+                                          style: const TextStyle(fontSize: 16)),
+                                      if (address.notes != null &&
+                                          address.notes!.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Row(children: [
+                                          const Icon(Icons.note,
+                                              size: 16,
+                                              color: Colors.grey),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                              child: Text(address.notes!,
+                                                  style: const TextStyle(
+                                                      color: Colors.grey,
+                                                      fontSize: 14)))
+                                        ])
+                                      ]
+                                    ])))
+                          ],
+                          if (order.notes != null &&
+                              order.notes!.isNotEmpty) ...[
+                            const Divider(height: 24),
+                            const Text('GENERAL NOTES',
+                                style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 4),
+                            Text(order.notes!, style: const TextStyle(fontSize: 16))
+                          ],
+                          const SizedBox(height: 16),
+                          Row(children: [
+                            Expanded(
+                                child: ElevatedButton.icon(
+                                    onPressed: () =>
+                                        _openChatForOrder(order),
+                                    icon: const Icon(Icons.chat, size: 18),
+                                    label: const Text('Chat'),
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue,
+                                        foregroundColor: Colors.white))),
+                            const SizedBox(width: 8),
+                            Expanded(
+                                flex: 2,
+                                child: ElevatedButton(
+                                    onPressed: () {
+                                      try {
+                                        _updateOrderStatus(
+                                            order, order.status);
+                                      } catch (e, stackTrace) {
+                                        print(
+                                            '❌ ERROR in button handler: $e');
+                                        print('Stack trace: $stackTrace');
+                                      }
+                                    },
+                                    child: Text(order.status == 'accepted'
+                                        ? 'Start Delivery'
+                                        : 'Mark as Completed')))
+                          ])
+                        ])
+                ])));
   }
 
   Widget _buildAddressCard(app_order.Order order) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(order.status),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    order.status.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  DateFormat('MM/dd/yyyy').format(order.createdAt),
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              order.pickupAddress.fullAddress,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            if (order.notes != null && order.notes!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Row(
+        margin: const EdgeInsets.only(bottom: 16),
+        elevation: 4,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.note, size: 16, color: Colors.grey),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      order.notes!,
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 16),
-            if (order.status.toLowerCase() == 'assigned')
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _acceptOrder(order),
-                      icon: const Icon(Icons.check),
-                      label: const Text('Accept'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _denyOrder(order),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Deny'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _openChatForOrder(order),
-                      icon: const Icon(Icons.chat, size: 18),
-                      label: const Text('Chat'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        print(
-                            '🚀 START DELIVERY BUTTON CLICKED (Address Card)');
-                        print('Order ID: ${order.id}');
-                        print('Order Status: ${order.status}');
-                        print(
-                            'Order Source Collection: ${order.sourceCollection}');
-                        print(
-                            'Pickup Address: ${order.pickupAddress.fullAddress}');
-                        print(
-                            'Drop-off Addresses Count: ${order.dropOffAddresses.length}');
-                        try {
-                          _updateOrderStatus(order, order.status);
-                        } catch (e, stackTrace) {
-                          print('❌ ERROR in button handler (Address Card): $e');
-                          print('Stack trace: $stackTrace');
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error: ${e.toString()}'),
-                                backgroundColor: Colors.red,
-                                duration: const Duration(seconds: 5),
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      child: Text(order.status == 'accepted'
-                          ? 'Start Delivery'
-                          : 'Mark as Completed'),
-                    ),
-                  ),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
+                  Row(children: [
+                    Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                            color: _getStatusColor(order.status),
+                            borderRadius: BorderRadius.circular(20)),
+                        child: Text(order.status.toUpperCase(),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold))),
+                    const Spacer(),
+                    Text(DateFormat('MM/dd/yyyy').format(order.createdAt),
+                        style: const TextStyle(
+                            color: Colors.grey, fontSize: 12))
+                  ]),
+                  const SizedBox(height: 12),
+                  Text(order.pickupAddress.fullAddress,
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w600)),
+                  if (order.notes != null && order.notes!.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Icon(Icons.note, size: 16, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Expanded(
+                          child: Text(order.notes!,
+                              style: const TextStyle(color: Colors.grey)))
+                    ])
+                  ],
+                  const SizedBox(height: 16),
+                  if (order.status.toLowerCase() == 'assigned')
+                    Row(children: [
+                      Expanded(
+                          child: ElevatedButton.icon(
+                              onPressed: () => _acceptOrder(order),
+                              icon: const Icon(Icons.check),
+                              label: const Text('Accept'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white))),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          child: ElevatedButton.icon(
+                              onPressed: () => _denyOrder(order),
+                              icon: const Icon(Icons.close),
+                              label: const Text('Deny'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Colors.white)))
+                    ])
+                  else
+                    Row(children: [
+                      Expanded(
+                          child: ElevatedButton.icon(
+                              onPressed: () =>
+                                  _openChatForOrder(order),
+                              icon: const Icon(Icons.chat, size: 18),
+                              label: const Text('Chat'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  foregroundColor: Colors.white))),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          flex: 2,
+                          child: ElevatedButton(
+                              onPressed: () {
+                                try {
+                                  _updateOrderStatus(order, order.status);
+                                } catch (e, stackTrace) {
+                                  print(
+                                      '❌ ERROR in button handler (Address Card): $e');
+                                  print('Stack trace: $stackTrace');
+                                }
+                              },
+                              child: Text(order.status == 'accepted'
+                                  ? 'Start Delivery'
+                                  : 'Mark as Completed')))
+                    ])
+                ])));
   }
 
   Color _getStatusColor(String status) {
@@ -533,7 +424,6 @@ class _DriverAssignedOrdersScreenState
       case 'assigned':
         return Colors.orange;
       case 'accepted':
-        return Colors.blue;
       case 'in_progress':
         return Colors.blue;
       case 'completed':
@@ -545,7 +435,10 @@ class _DriverAssignedOrdersScreenState
 
   Future<void> _acceptOrder(app_order.Order order) async {
     try {
-      await _firestore.collection(order.sourceCollection).doc(order.id).update({
+      await _firestore
+          .collection(order.sourceCollection)
+          .doc(order.id)
+          .update({
         'status': 'accepted',
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -749,234 +642,95 @@ class _DriverAssignedOrdersScreenState
 
   Future<void> _updateOrderStatus(
       app_order.Order order, String currentStatus) async {
-    print('📋 _updateOrderStatus called');
-    print('Order ID: ${order.id}');
-    print('Current Status: $currentStatus');
-    print('Order Status: ${order.status}');
-
-    try {
-      // If status is 'accepted', trigger routing instead of directly updating
-      if (currentStatus.toLowerCase() == 'accepted') {
-        print('✅ Status is accepted, calling _startDeliveryRouting');
-        await _startDeliveryRouting(order);
-        return;
-      }
-
-      print('Status is not accepted, checking for other status updates');
-
-      // For 'in_progress', mark as completed
-      String newStatus;
-      switch (currentStatus.toLowerCase()) {
-        case 'in_progress':
-          newStatus = 'completed';
-          print('Updating status from in_progress to completed');
-          break;
-        default:
-          print('No status update needed for: ${currentStatus.toLowerCase()}');
-          return;
-      }
-      await _firestore.collection(order.sourceCollection).doc(order.id).update({
-        'status': newStatus,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-      print('✅ Order status updated successfully to: $newStatus');
-    } catch (e, stackTrace) {
-      print('❌ ERROR in _updateOrderStatus: $e');
-      print('Stack trace: $stackTrace');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error updating order: $e'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-        ),
-      );
+    if (currentStatus.toLowerCase() == 'accepted') {
+      await _startDeliveryRouting(order);
+      return;
     }
+    String newStatus;
+    switch (currentStatus.toLowerCase()) {
+      case 'in_progress':
+        newStatus = 'completed';
+        break;
+      default:
+        return;
+    }
+    await _firestore
+        .collection(order.sourceCollection)
+        .doc(order.id)
+        .update({
+      'status': newStatus,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   Future<void> _startDeliveryRouting(app_order.Order order) async {
-    print('🗺️ _startDeliveryRouting STARTED');
+    print('\n');
+    print('======================================================');
+    print('🚦 STARTING DELIVERY ROUTING 🚦');
+    print('======================================================');
     print('Order ID: ${order.id}');
-    print('Order Status: ${order.status}');
-    print('Mounted: $mounted');
 
-    if (!mounted) {
-      print('❌ Widget not mounted, returning');
-      return;
-    }
+    if (!mounted) return;
 
-    // Show loading dialog
     BuildContext? dialogContext;
-    print('📱 Showing loading dialog...');
     showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogBuildContext) {
-        dialogContext = dialogBuildContext;
-        print('✅ Loading dialog builder called');
-        return const Center(
-          child: Card(
-            child: Padding(
-              padding: EdgeInsets.all(20.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Calculating route...'),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-    print('✅ Loading dialog shown');
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogBuildContext) {
+          dialogContext = dialogBuildContext;
+          return const Center(
+              child: Card(
+                  child: Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Calculating route...')
+                      ]))));
+        });
 
     try {
-      // Get addresses
-      print('📍 Getting addresses from order...');
-      final pickupAddress = order.pickupAddress;
-      final dropOffAddresses = order.dropOffAddresses;
+      var pickup = order.pickupAddress;
+      final dropOffs = order.dropOffAddresses;
 
-      print('Pickup Address: ${pickupAddress.fullAddress}');
-      print('Pickup has coordinates: ${pickupAddress.hasCoordinates}');
-      if (pickupAddress.hasCoordinates) {
-        print(
-            'Pickup coordinates: ${pickupAddress.latitude}, ${pickupAddress.longitude}');
-      }
-      print('Drop-off addresses count: ${dropOffAddresses.length}');
+      final addressesForRouting = <DeliveryAddress>[_currentEmulatorLocation];
 
-      if (dropOffAddresses.isEmpty) {
-        print('❌ No drop-off addresses found');
-        if (!mounted) return;
-        if (dialogContext != null) {
-          Navigator.pop(dialogContext!); 
-          print('✅ Closed loading dialog');
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No drop-off address found for this order'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      // Ensure addresses have coordinates
-      print('🌍 Ensuring addresses have coordinates...');
-      var pickup = pickupAddress;
       if (!pickup.hasCoordinates) {
-        print('⚠️ Pickup address lacks coordinates, geocoding...');
-        if (!mounted) return;
-        if (dialogContext != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Geocoding pickup address...')),
-          );
-        }
-        try {
-          pickup = await GeocodingService.geocodeAddress(pickup);
-          print('✅ Pickup geocoded: ${pickup.latitude}, ${pickup.longitude}');
-        } catch (e) {
-          print('❌ Geocoding pickup failed: $e');
-          throw Exception('Failed to geocode pickup address: $e');
-        }
-      } else {
-        print('✅ Pickup already has coordinates');
+        print('  -> Geocoding pickup: ${pickup.fullAddress}');
+        pickup = await GeocodingService.geocodeAddress(pickup);
       }
+      addressesForRouting.add(pickup);
 
-      // Handle multiple drop-offs - use all of them for routing
-      print('📍 Processing ${dropOffAddresses.length} drop-off addresses...');
-      final addressesForRouting = <DeliveryAddress>[pickup];
-      for (int i = 0; i < dropOffAddresses.length; i++) {
-        var dropOff = dropOffAddresses[i];
-        print(
-            'Processing drop-off ${i + 1}/${dropOffAddresses.length}: ${dropOff.fullAddress}');
-        print('Has coordinates: ${dropOff.hasCoordinates}');
-
+      for (var dropOff in dropOffs) {
         if (!dropOff.hasCoordinates) {
-          print('⚠️ Drop-off ${i + 1} lacks coordinates, geocoding...');
-          if (!mounted) return;
-          try {
-            dropOff = await GeocodingService.geocodeAddress(dropOff);
-            print(
-                '✅ Drop-off ${i + 1} geocoded: ${dropOff.latitude}, ${dropOff.longitude}');
-          } catch (e) {
-            print('❌ Geocoding drop-off ${i + 1} failed: $e');
-            throw Exception('Failed to geocode drop-off address ${i + 1}: $e');
-          }
-        } else {
-          print('✅ Drop-off ${i + 1} already has coordinates');
+          print('  -> Geocoding drop-off: ${dropOff.fullAddress}');
+          dropOff = await GeocodingService.geocodeAddress(dropOff);
         }
         addressesForRouting.add(dropOff);
       }
-
-      print(
-          '✅ All addresses processed. Total addresses for routing: ${addressesForRouting.length}');
-
-      // Initialize AWS Route Service
-      print('🔧 Initializing AWS Route Service...');
-      final awsService = AwsRouteService();
-      print('AWS Service available: ${awsService.isAvailable}');
-
-      if (!awsService.isAvailable) {
-        print('⚠️ AWS Route Service not available, initializing...');
-        try {
-          await awsService.initialize();
-          print('✅ AWS Route Service initialized successfully');
-          print('AWS Service now available: ${awsService.isAvailable}');
-        } catch (initError, initStack) {
-          print('❌ Failed to initialize AWS Route Service: $initError');
-          print('Stack trace: $initStack');
-          if (!mounted) return;
-          if (dialogContext != null && Navigator.canPop(dialogContext!)) {
-            Navigator.pop(dialogContext!); 
-            print('✅ Closed loading dialog after init failure');
-          }
-          throw Exception(
-              'Failed to initialize AWS Route Service. Please check your .env file and AWS configuration.');
-        }
-      } else {
-        print('✅ AWS Route Service already available');
+      
+      print('\n📍 Addresses for routing:');
+      for (var addr in addressesForRouting) {
+        print('  - ${addr.fullAddress}');
       }
+      
+      print('\n☁️ Calling AWS Route Service for a \'Truck\' route...');
 
-      print(
-          '🗺️ Calculating AWS route for ${addressesForRouting.length} addresses');
-      print(
-          'Pickup: ${pickup.fullAddress} (${pickup.latitude}, ${pickup.longitude})');
-      for (int i = 0; i < dropOffAddresses.length; i++) {
-        final dropOff = addressesForRouting[i + 1];
-        print(
-            'Drop-off ${i + 1}: ${dropOff.fullAddress} (${dropOff.latitude}, ${dropOff.longitude})');
-      }
-
-      // Calculate route using AWS (with all drop-offs as waypoints)
-      print('⏳ Calling AWS calculateRoute...');
-      final routeOptimization = await awsService.calculateRoute(
+      final routeOptimization = await _awsRouteService.calculateRoute(
         addresses: addressesForRouting,
-        startAddress: pickup,
         travelMode: 'Truck',
-        optimizationMode: 'FastestRoute',
       );
 
-      print('✅ AWS route calculated successfully');
-      print('Total distance: ${routeOptimization.totalDistance} km');
-      print('Estimated time: ${routeOptimization.estimatedTime}');
-      print('Route steps: ${routeOptimization.optimizedRoute?.length ?? 0}');
+      print('✅ AWS Route calculation successful!');
+      print('  - Total Distance: ${routeOptimization.totalDistance?.toStringAsFixed(1)} km');
+      print('  - Estimated Time: ${routeOptimization.estimatedTime?.inMinutes} minutes');
+      print('  - Route Steps: ${routeOptimization.optimizedRoute?.length ?? 0}');
+      print('======================================================\n');
 
-      if (!mounted) {
-        print('❌ Widget not mounted after route calculation');
-        return;
-      }
+      if (!mounted) return;
+      if (dialogContext != null) Navigator.pop(dialogContext!);
 
-      if (dialogContext != null) {
-        Navigator.pop(dialogContext!); 
-        print('✅ Closed loading dialog');
-      }
-
-      // Navigate to in-app route preview screen
-      print('📱 Navigating to route preview screen...');
-      Navigator.push(
+      final result = await Navigator.push<String>(
         context,
         MaterialPageRoute(
           builder: (context) => RoutePreviewScreen(
@@ -985,212 +739,19 @@ class _DriverAssignedOrdersScreenState
           ),
         ),
       );
-      print('✅ Route preview screen shown');
+
+      if (mounted && result == 'completed') {
+        // Screen will refresh automatically
+      }
     } catch (e, stackTrace) {
       print('❌ Error in _startDeliveryRouting: $e');
       print('Stack trace: $stackTrace');
-
-      if (!mounted) {
-        print('❌ Widget not mounted, cannot show error');
-        return;
-      }
-
-      if (dialogContext != null && Navigator.canPop(dialogContext!)) {
-        Navigator.pop(dialogContext!); 
-        print('✅ Closed loading dialog after error');
-      }
-
-      // Provide more specific error messages
-      String errorMessage = 'Route calculation failed';
-      bool isAwsError = false;
-      bool fallbackUsed = false;
-
-      if (e.toString().contains('AWS Route Service not initialized')) {
-        errorMessage =
-            'AWS Route Service not configured. Please check your .env file.';
-        isAwsError = true;
-      } else if (e.toString().contains('AWS API error')) {
-        errorMessage =
-            'AWS API error. Please verify your API key has CalculateRoutes permission.';
-        isAwsError = true;
-      } else if (e.toString().contains('Fallback route used')) {
-        errorMessage = e.toString();
-        isAwsError = true;
-        fallbackUsed = true;
-      } else if (e.toString().contains('DNS failure') ||
-          e.toString().contains('Cannot reach AWS servers')) {
-        errorMessage =
-            'Cannot reach AWS routing servers. Check network connectivity or test on a real device.';
-        isAwsError = true;
-      } else if (e.toString().contains('coordinates')) {
-        errorMessage =
-            'Address geocoding failed. Please check the addresses are valid.';
-      } else {
-        errorMessage = 'Route calculation failed: ${e.toString()}';
-      }
-
-      print('Error message: $errorMessage');
-      print('Is AWS error: $isAwsError');
-
-      final shouldShowBanner = !fallbackUsed;
-
-      if (mounted && shouldShowBanner) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: isAwsError ? Colors.orange : Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-
-      // If AWS fails but we have addresses, create a fallback route
-      if (isAwsError) {
-        try {
-          print('🔄 Attempting to create fallback route...');
-          final pickupAddress = order.pickupAddress;
-          final dropOffAddresses = order.dropOffAddresses;
-
-          if (dropOffAddresses.isNotEmpty) {
-            // Create a simple route optimization with pickup and drop-off
-            var pickup = pickupAddress;
-            if (!pickup.hasCoordinates) {
-              pickup = await GeocodingService.geocodeAddress(pickup);
-            }
-
-            var dropOff = dropOffAddresses.first;
-            if (!dropOff.hasCoordinates) {
-              dropOff = await GeocodingService.geocodeAddress(dropOff);
-            }
-
-            if (pickup.hasCoordinates && dropOff.hasCoordinates) {
-              print(
-                  '✅ Creating fallback route from ${pickup.fullAddress} to ${dropOff.fullAddress}');
-
-              // Calculate simple distance
-              final lat1 = pickup.latitude!;
-              final lon1 = pickup.longitude!;
-              final lat2 = dropOff.latitude!;
-              final lon2 = dropOff.longitude!;
-
-              // Haversine formula for distance
-              final dLat = (lat2 - lat1) * pi / 180;
-              final dLon = (lon2 - lon1) * pi / 180;
-              final a = sin(dLat / 2) * sin(dLat / 2) +
-                  cos(lat1 * pi / 180) *
-                      cos(lat2 * pi / 180) *
-                      sin(dLon / 2) *
-                      sin(dLon / 2);
-              final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-              final distance = 6371 * c; // Earth radius in km
-
-              // Estimate time (assuming 50 km/h average)
-              final estimatedSeconds = (distance / 50 * 3600).round();
-
-              // Create simple route steps
-              final routeSteps = <RouteStep>[
-                RouteStep(
-                  sequenceNumber: 1,
-                  address: pickup,
-                  distanceFromPrevious: 0,
-                  estimatedTravelTime: const Duration(seconds: 0),
-                  instructions: 'Start at ${pickup.fullAddress}',
-                ),
-                RouteStep(
-                  sequenceNumber: 2,
-                  address: dropOff,
-                  distanceFromPrevious: distance,
-                  estimatedTravelTime: Duration(seconds: estimatedSeconds),
-                  instructions: 'Deliver to ${dropOff.fullAddress}',
-                ),
-              ];
-
-              final geometry = <List<double>>[];
-              for (int i = 0; i <= 10; i++) {
-                final fraction = i / 10.0;
-                final lat = lat1 + (lat2 - lat1) * fraction;
-                final lng = lon1 + (lon2 - lon1) * fraction;
-                geometry.add([lat, lng]);
-              }
-
-              final fallbackRoute = RouteOptimization(
-                name: 'Fallback Route (AWS Unavailable)',
-                addresses: [pickup, dropOff],
-                algorithm: RouteAlgorithm.nearestNeighbor,
-                optimizedRoute: routeSteps,
-                totalDistance: distance,
-                estimatedTime: Duration(seconds: estimatedSeconds),
-                routeGeometry: geometry,
-                completedAt: DateTime.now(),
-              );
-
-              print(
-                  '✅ Fallback route created: ${fallbackRoute.totalDistance} km, ${fallbackRoute.estimatedTime}');
-
-              if (mounted) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => RoutePreviewScreen(
-                      routeOptimization: fallbackRoute,
-                      order: order,
-                    ),
-                  ),
-                );
-              }
-              return;
-            }
-          }
-        } catch (fallbackError) {
-          print('❌ Fallback route creation also failed: $fallbackError');
-        }
-
-        if (fallbackUsed) return;
-
-        if (mounted) {
-          await showDialog(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('Route Unavailable'),
-              content: Text(errorMessage),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          );
-        }
-        return;
-      }
-
+      if (mounted && dialogContext != null) Navigator.pop(dialogContext!);
       if (mounted) {
-        await showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Route Unavailable'),
-            content: Text(errorMessage),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error calculating route: ${e.toString()}'),
+            backgroundColor: Colors.red));
       }
-      return;
     }
-  }
-
-  String _formatDuration(Duration? duration) {
-    if (duration == null) return 'N/A';
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
-    if (hours > 0) {
-      return '${hours}h ${minutes}m';
-    }
-    return '${minutes}m';
   }
 }

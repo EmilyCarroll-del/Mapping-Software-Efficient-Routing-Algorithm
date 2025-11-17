@@ -1,189 +1,129 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/graph_provider.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/aws_route_service.dart';
+import '../models/delivery_address.dart';
 
-class GraphScreen extends StatelessWidget {
+class GraphScreen extends StatefulWidget {
   const GraphScreen({super.key});
+
+  @override
+  State<GraphScreen> createState() => _GraphScreenState();
+}
+
+class _GraphScreenState extends State<GraphScreen> {
+  final AWSRouteService _routeService = AWSRouteService();
+  GoogleMapController? _mapController;
+  final Set<Polyline> _polylines = {};
+  final Set<Marker> _markers = {};
+
+  final DeliveryAddress _startAddress = DeliveryAddress(
+    streetAddress: '1 Infinite Loop',
+    city: 'Cupertino',
+    state: 'CA',
+    zipCode: '95014',
+    latitude: 37.3318,
+    longitude: -122.0312,
+  );
+
+  final DeliveryAddress _endAddress = DeliveryAddress(
+    streetAddress: '1600 Amphitheatre Parkway',
+    city: 'Mountain View',
+    state: 'CA',
+    zipCode: '94043',
+    latitude: 37.4220,
+    longitude: -122.0841,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _addMarkers();
+    _routeService.initialize();
+  }
+
+  void _addMarkers() {
+    _markers.add(Marker(
+      markerId: const MarkerId('start'),
+      position: LatLng(_startAddress.latitude!, _startAddress.longitude!),
+      infoWindow: const InfoWindow(title: 'Start'),
+    ));
+    _markers.add(Marker(
+      markerId: const MarkerId('end'),
+      position: LatLng(_endAddress.latitude!, _endAddress.longitude!),
+      infoWindow: const InfoWindow(title: 'End'),
+    ));
+  }
+
+  Future<void> _calculateAndDisplayRoute() async {
+    try {
+      final routeData = await _routeService.calculateRoute(
+        addresses: [_startAddress, _endAddress],
+        travelMode: 'Truck',
+      );
+
+      if (routeData.routeGeometry != null) {
+        final List<LatLng> routePoints = routeData.routeGeometry!
+            .map((point) => LatLng(point[0], point[1]))
+            .toList();
+
+        setState(() {
+          _polylines.add(
+            Polyline(
+              polylineId: const PolylineId('route'),
+              points: routePoints,
+              color: Colors.blue,
+              width: 5,
+            ),
+          );
+        });
+
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngBounds(
+            _createLatLngBounds(routePoints),
+            50.0, // padding
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error calculating route: $e')),
+      );
+    }
+  }
+
+  LatLngBounds _createLatLngBounds(List<LatLng> points) {
+    final southwest = points.reduce((a, b) => LatLng(
+          a.latitude < b.latitude ? a.latitude : b.latitude,
+          a.longitude < b.longitude ? a.longitude : b.longitude,
+        ));
+    final northeast = points.reduce((a, b) => LatLng(
+          a.latitude > b.latitude ? a.latitude : b.latitude,
+          a.longitude > b.longitude ? a.longitude : b.longitude,
+        ));
+    return LatLngBounds(southwest: southwest, northeast: northeast);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D2B0D),
-        title: const Text('Graph Visualization'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () {
-              // Add node functionality
-              _showAddNodeDialog(context);
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              Provider.of<GraphProvider>(context, listen: false).clearGraph();
-            },
-          ),
-        ],
+        title: const Text('AWS Truck Route'),
       ),
-      body: Consumer<GraphProvider>(
-        builder: (context, graphProvider, child) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (graphProvider.nodes.isEmpty)
-                  Column(
-                    children: [
-                      Icon(
-                        Icons.account_tree_outlined,
-                        size: 80,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No graph data yet',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Add nodes to start building your graph',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[500],
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  Expanded(
-                    child: CustomPaint(
-                      painter: GraphPainter(graphProvider.nodes, graphProvider.edges),
-                      child: Container(),
-                    ),
-                  ),
-                const SizedBox(height: 20),
-                Text(
-                  'Nodes: ${graphProvider.nodes.length}',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-                Text(
-                  'Edges: ${graphProvider.edges.length}',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              ],
-            ),
-          );
-        },
+      body: GoogleMap(
+        initialCameraPosition: CameraPosition(
+          target: LatLng(_startAddress.latitude!, _startAddress.longitude!),
+          zoom: 12,
+        ),
+        onMapCreated: (controller) => _mapController = controller,
+        markers: _markers,
+        polylines: _polylines,
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddNodeDialog(context),
-        tooltip: 'Add Node',
-        child: const Icon(Icons.add),
+        onPressed: _calculateAndDisplayRoute,
+        tooltip: 'Calculate Route',
+        child: const Icon(Icons.directions),
       ),
     );
   }
-
-  void _showAddNodeDialog(BuildContext context) {
-    final TextEditingController controller = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Add Node'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(
-              hintText: 'Enter node label',
-            ),
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (controller.text.isNotEmpty) {
-                  Provider.of<GraphProvider>(context, listen: false)
-                      .addNode(controller.text);
-                  Navigator.of(context).pop();
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class GraphPainter extends CustomPainter {
-  final List<GraphNode> nodes;
-  final List<GraphEdge> edges;
-
-  GraphPainter(this.nodes, this.edges);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint nodePaint = Paint()
-      ..color = Colors.blue
-      ..style = PaintingStyle.fill;
-
-    final Paint edgePaint = Paint()
-      ..color = Colors.grey
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke;
-
-
-    // Draw edges first
-    for (final edge in edges) {
-      final startNode = nodes.firstWhere((n) => n.id == edge.fromId);
-      final endNode = nodes.firstWhere((n) => n.id == edge.toId);
-
-      canvas.drawLine(
-        Offset(startNode.x, startNode.y),
-        Offset(endNode.x, endNode.y),
-        edgePaint,
-      );
-    }
-
-    // Draw nodes
-    for (final node in nodes) {
-      canvas.drawCircle(
-        Offset(node.x, node.y),
-        20,
-        nodePaint,
-      );
-
-      // Draw node label
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: node.label,
-          style: const TextStyle(color: Colors.white, fontSize: 12),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(
-          node.x - textPainter.width / 2,
-          node.y - textPainter.height / 2,
-        ),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

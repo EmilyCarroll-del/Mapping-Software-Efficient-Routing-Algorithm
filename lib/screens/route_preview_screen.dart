@@ -5,14 +5,6 @@ import '../models/route_optimization.dart';
 import '../models/order.dart' as app_order;
 import 'navigation_screen.dart';
 
-/// Route Preview Screen
-/// 
-/// Shows the calculated route on an embedded Google Maps with:
-/// - Route polyline
-/// - Pickup and dropoff markers
-/// - Route summary (distance, time)
-/// - List of directions
-/// - "Start Navigation" button (like Uber/Lyft)
 class RoutePreviewScreen extends StatefulWidget {
   final RouteOptimization routeOptimization;
   final app_order.Order order;
@@ -39,33 +31,13 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
   }
 
   void _setupMapElements() {
-    print('🗺️ Setting up map elements');
-    
-    // Build polyline from route geometry
-    List<LatLng> routePoints = [];
-    
-    if (widget.routeOptimization.routeGeometry != null &&
-        widget.routeOptimization.routeGeometry!.isNotEmpty) {
-      // Use AWS-provided geometry
-      routePoints = widget.routeOptimization.routeGeometry!
-          .map((point) => LatLng(point[0], point[1]))
-          .toList();
-      print('✅ Using ${routePoints.length} points from AWS geometry');
-    } else {
-      // Fallback: Create straight line from stops
-      print('⚠️ No route geometry from AWS, creating fallback straight line');
-      final route = widget.routeOptimization.optimizedRoute;
-      if (route != null && route.isNotEmpty) {
-        for (final step in route) {
-          if (step.address.hasCoordinates) {
-            routePoints.add(LatLng(step.address.latitude!, step.address.longitude!));
-          }
-        }
-        print('✅ Created ${routePoints.length} points from stops');
-      }
-    }
+    print('🗺️ Setting up map elements for Route Preview');
 
-    // Add polyline if we have points
+    final routePoints = widget.routeOptimization.routeGeometry
+            ?.map((point) => LatLng(point[0], point[1]))
+            .toList() ??
+        [];
+
     if (routePoints.length >= 2) {
       _polylines.add(
         Polyline(
@@ -73,71 +45,37 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
           points: routePoints,
           color: Colors.blue,
           width: 5,
-          startCap: Cap.roundCap,
-          endCap: Cap.roundCap,
         ),
       );
-      print('✅ Added polyline with ${routePoints.length} points to map');
-    } else {
-      print('⚠️ Not enough points for polyline');
     }
 
-    // Add markers for stops
-    final route = widget.routeOptimization.optimizedRoute;
-    if (route != null && route.isNotEmpty) {
-      // Pickup marker (first stop)
-      final pickup = route.first.address;
-      if (pickup.hasCoordinates) {
-        _markers.add(
-          Marker(
-            markerId: const MarkerId('pickup'),
-            position: LatLng(pickup.latitude!, pickup.longitude!),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-            infoWindow: InfoWindow(
-              title: 'Pickup',
-              snippet: pickup.fullAddress,
-            ),
-          ),
-        );
-      }
+    final majorStops = widget.routeOptimization.legs;
 
-      // Dropoff marker (last stop)
-      final dropoff = route.last.address;
-      if (dropoff.hasCoordinates) {
-        _markers.add(
-          Marker(
-            markerId: const MarkerId('dropoff'),
-            position: LatLng(dropoff.latitude!, dropoff.longitude!),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-            infoWindow: InfoWindow(
-              title: 'Dropoff',
-              snippet: dropoff.fullAddress,
-            ),
-          ),
-        );
-      }
-
-      // Add intermediate waypoint markers
-      for (int i = 1; i < route.length - 1; i++) {
-        final waypoint = route[i].address;
-        if (waypoint.hasCoordinates) {
+    if (majorStops.isNotEmpty) {
+      for (int i = 0; i < majorStops.length; i++) {
+        final step = majorStops[i];
+        if (step.address.hasCoordinates) {
           _markers.add(
             Marker(
-              markerId: MarkerId('waypoint_$i'),
-              position: LatLng(waypoint.latitude!, waypoint.longitude!),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+              markerId: MarkerId('stop_$i'),
+              position: LatLng(step.address.latitude!, step.address.longitude!),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                i == 0 ? BitmapDescriptor.hueViolet : // Starting point
+                i == 1 ? BitmapDescriptor.hueGreen  : // First stop (Pickup)
+                BitmapDescriptor.hueRed,             // Subsequent stops (Dropoff)
+              ),
               infoWindow: InfoWindow(
-                title: 'Stop ${i + 1}',
-                snippet: waypoint.fullAddress,
+                title: step.address.fullAddress,
+                snippet: i == 0 ? 'Start' : 'Stop $i',
               ),
             ),
           );
         }
       }
-
-      print('✅ Added ${_markers.length} markers');
+      print('✅ Added ${_markers.length} markers to the map.');
     }
   }
+
 
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
@@ -147,10 +85,9 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
   void _fitMapToBounds() {
     if (_mapController == null) return;
 
-    final route = widget.routeOptimization.optimizedRoute;
-    if (route == null || route.isEmpty) return;
+    final route = widget.routeOptimization.legs;
+    if (route.isEmpty) return;
 
-    // Calculate bounds from all addresses
     double minLat = double.infinity;
     double maxLat = -double.infinity;
     double minLng = double.infinity;
@@ -191,8 +128,11 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final route = widget.routeOptimization.optimizedRoute ?? [];
-    final pickup = route.isNotEmpty ? route.first.address : null;
+    final displaySteps = widget.routeOptimization.legs.length > 1
+        ? widget.routeOptimization.legs.sublist(1)
+        : <RouteStep>[];
+
+    final pickup = displaySteps.isNotEmpty ? displaySteps.first.address : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -202,7 +142,6 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
       ),
       body: Column(
         children: [
-          // Map showing route
           Expanded(
             flex: 3,
             child: GoogleMap(
@@ -210,7 +149,7 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
               initialCameraPosition: CameraPosition(
                 target: pickup != null && pickup.hasCoordinates
                     ? LatLng(pickup.latitude!, pickup.longitude!)
-                    : const LatLng(37.7749, -122.4194), // Default SF
+                    : const LatLng(40.7143, -73.5994), // Fallback
                 zoom: 12,
               ),
               polylines: _polylines,
@@ -221,8 +160,6 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
               zoomControlsEnabled: false,
             ),
           ),
-
-          // Route summary and directions
           Expanded(
             flex: 2,
             child: Container(
@@ -238,7 +175,6 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
               ),
               child: Column(
                 children: [
-                  // Route summary
                   Container(
                     padding: const EdgeInsets.all(16),
                     color: const Color(0xFF0D2B0D).withOpacity(0.1),
@@ -257,31 +193,28 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
                         ),
                         _buildSummaryItem(
                           Icons.location_on,
-                          '${route.length}',
+                          '${displaySteps.length}',
                           'Stops',
                         ),
                       ],
                     ),
                   ),
-
-                  // Directions list
                   Expanded(
                     child: ListView.builder(
                       padding: const EdgeInsets.all(16),
-                      itemCount: route.length,
+                      itemCount: displaySteps.length,
                       itemBuilder: (context, index) {
-                        final step = route[index];
+                        final step = displaySteps[index];
+                        final isPickup = index == 0;
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
                           child: ListTile(
                             leading: CircleAvatar(
-                              backgroundColor: index == 0
+                              backgroundColor: isPickup
                                   ? Colors.green
-                                  : (index == route.length - 1
-                                      ? Colors.red
-                                      : Colors.blue),
+                                  : Colors.red,
                               child: Text(
-                                '${step.sequenceNumber}',
+                                '${index + 1}',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
@@ -292,9 +225,7 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
                               step.address.fullAddress,
                               style: const TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            subtitle: step.instructions != null
-                                ? Text(step.instructions!)
-                                : null,
+                            subtitle: Text('Leg distance: ${step.distanceFromPrevious?.toStringAsFixed(1) ?? '0'} km'),
                             trailing: step.distanceFromPrevious != null &&
                                     step.distanceFromPrevious! > 0
                                 ? Text(
@@ -379,8 +310,7 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
 
   void _startNavigation() async {
     print('🚀 Starting navigation');
-    
-    // Update order status to in_progress
+
     try {
       await FirebaseFirestore.instance
           .collection(widget.order.sourceCollection)
@@ -396,7 +326,6 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
 
     if (!mounted) return;
 
-    // Navigate to full-screen navigation
     final result = await Navigator.push<String>(
       context,
       MaterialPageRoute(
@@ -407,7 +336,6 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
       ),
     );
 
-    // After navigation completes, return to previous screen if delivery finished
     if (mounted && result == 'completed') {
       Navigator.pop(context, 'completed');
     }
@@ -419,4 +347,3 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
     super.dispose();
   }
 }
-

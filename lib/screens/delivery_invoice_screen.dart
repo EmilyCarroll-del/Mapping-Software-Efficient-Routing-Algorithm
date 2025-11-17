@@ -102,7 +102,11 @@ class _DeliveryInvoiceScreenState extends State<DeliveryInvoiceScreen> {
   @override
   Widget build(BuildContext context) {
     final estimated = widget.routeOptimization.estimatedTime;
-    final optimizedSteps = widget.routeOptimization.optimizedRoute ?? [];
+    // --- MODIFICATION: Skip the first stop (Hofstra) for UI display ---
+    final displaySteps = widget.routeOptimization.optimizedRoute != null &&
+            widget.routeOptimization.optimizedRoute!.length > 1
+        ? widget.routeOptimization.optimizedRoute!.sublist(1)
+        : <RouteStep>[];
     final distanceKm = widget.routeOptimization.totalDistance ?? 0;
     final primaryText =
         _completed ? 'Back to Assigned Orders' : 'Complete Order';
@@ -134,7 +138,7 @@ class _DeliveryInvoiceScreenState extends State<DeliveryInvoiceScreen> {
                 dateFormatter: _formatDateTime,
               ),
               const SizedBox(height: 16),
-              _StopsCard(steps: optimizedSteps),
+              _StopsCard(steps: displaySteps), // Use the modified list
               const SizedBox(height: 16),
               _DetailsCard(order: widget.order),
               if (_errorMessage != null) ...[
@@ -312,14 +316,17 @@ class _StopsCard extends StatelessWidget {
             if (steps.isEmpty)
               const Text('No route details available.')
             else
-              ...steps.map((step) {
-                final isPickup = step.sequenceNumber == 1;
-                final isFinal = step.sequenceNumber == steps.length;
+              ...steps.asMap().entries.map((entry) {
+                final index = entry.key;
+                final step = entry.value;
+                
+                final isPickup = index == 0;
+                final isFinal = index == steps.length - 1;
                 final title = isPickup
                     ? 'Pickup'
                     : (isFinal
                         ? 'Final Dropoff'
-                        : 'Stop ${step.sequenceNumber - 1}');
+                        : 'Stop ${index + 1}');
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: ListTile(
@@ -329,7 +336,7 @@ class _StopsCard extends StatelessWidget {
                           ? Colors.green
                           : (isFinal ? Colors.red : Colors.blue),
                       child: Text(
-                        step.sequenceNumber.toString(),
+                        (index + 1).toString(), // Display numbers 1, 2, 3...
                         style: const TextStyle(color: Colors.white),
                       ),
                     ),

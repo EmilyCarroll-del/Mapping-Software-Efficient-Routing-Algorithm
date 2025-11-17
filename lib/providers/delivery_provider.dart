@@ -210,11 +210,13 @@ class DeliveryProvider extends ChangeNotifier {
         ));
       }
 
+      // --- FIX: Provide both 'legs' and 'detailedSteps' ---
       final routeOptimization = RouteOptimization(
         name: name,
         addresses: optimizedRoute,
         algorithm: algorithm,
-        optimizedRoute: routeSteps,
+        legs: routeSteps, // For non-AWS, legs and steps are the same
+        detailedSteps: routeSteps,
         totalDistance: totalDistance,
         estimatedTime: Duration(minutes: (totalDistance * 2).round()),
         completedAt: DateTime.now(),

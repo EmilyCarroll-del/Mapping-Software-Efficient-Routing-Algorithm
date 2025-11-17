@@ -25,7 +25,22 @@ class DeliveryAddress {
   })  : id = id ?? const Uuid().v4(),
         createdAt = createdAt ?? DateTime.now();
 
-  String get fullAddress => '$streetAddress, $city, $state $zipCode';
+  // --- FIX: Add the missing constructor ---
+  factory DeliveryAddress.fromCoordinates({
+    required double latitude,
+    required double longitude,
+  }) {
+    return DeliveryAddress(
+      streetAddress: 'On route', // Placeholder
+      city: '',
+      state: '',
+      zipCode: '',
+      latitude: latitude,
+      longitude: longitude,
+    );
+  }
+
+  String get fullAddress => streetAddress == 'On route' ? 'Intermediate turn' : '$streetAddress, $city, $state $zipCode';
 
   bool get hasCoordinates => latitude != null && longitude != null;
 
