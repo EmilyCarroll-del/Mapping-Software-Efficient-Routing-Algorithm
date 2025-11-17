@@ -1,12 +1,20 @@
 // lib/services/notification_service.dart
 import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class NotificationService {
-  NotificationService();
+  // navigatorKey is OPTIONAL so existing NotificationService() calls still work.
+  NotificationService([this.navigatorKey]);
+
+  // Used to navigate when a push notification is tapped.
+  // May be null if caller doesn't care about routing.
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -31,31 +39,53 @@ class NotificationService {
     _currentUserId = user.uid;
 
     try {
-      // Ask permission + store FCM token on the user doc
+      // -----------------------------
+      // 1) Ask permission + save FCM token
+      // -----------------------------
       final settings = await _messaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
+
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
         final token = await _messaging.getToken();
         if (token != null) {
           await _saveFCMToken(user.uid, token);
         }
+
         _messaging.onTokenRefresh.listen((newToken) {
           _saveFCMToken(user.uid, newToken);
         });
+      } else {
+        debugPrint('🔕 Notifications permission not granted');
       }
 
-      // We do NOT mirror FCM payloads into Firestore here — that was causing duplicates.
+      // -----------------------------
+      // 2) FCM listeners
+      // -----------------------------
+      // Foreground: just log for now (Android system tray handles bg)
       FirebaseMessaging.onMessage.listen((msg) {
         debugPrint('📩 onMessage (foreground): ${msg.data}');
       });
+
+      // When app is opened from a notification tap (background -> foreground)
       FirebaseMessaging.onMessageOpenedApp.listen((msg) {
         debugPrint('➡️ onMessageOpenedApp: ${msg.data}');
+        _handleNotificationTap(msg);
       });
 
-      // Orders listener (driver-only)
+      // When app is launched from a terminated state via a notification tap.
+      final initialMessage = await _messaging.getInitialMessage();
+      if (initialMessage != null) {
+        debugPrint(
+            '🚀 App launched from terminated via notification: ${initialMessage.data}');
+        _handleNotificationTap(initialMessage);
+      }
+
+      // -----------------------------
+      // 3) Orders listener (driver-only)
+      // -----------------------------
       await _setupOrderListeners();
 
       _isInitialized = true;
@@ -313,6 +343,73 @@ class NotificationService {
         .where('userId', isEqualTo: user.uid)
         .orderBy('timestamp', descending: true)
         .snapshots();
+  }
+
+  // ---- FCM tap handler / navigation ----
+
+  void _handleNotificationTap(RemoteMessage message) {
+    // If no navigatorKey was provided (e.g., some other caller used
+    // NotificationService() without args), just log and bail out.
+    if (navigatorKey == null) {
+      debugPrint(
+          '🔔 Notification tap received but navigatorKey is null; skipping navigation.');
+      return;
+    }
+
+    final ctx = navigatorKey!.currentContext;
+    if (ctx == null) {
+      debugPrint('⚠️ No navigator context available for navigation');
+      return;
+    }
+
+    final data = message.data;
+    final type = data['type'] as String?; // e.g., "chat", "assigned_orders", etc.
+
+    debugPrint('🔔 Handling notification tap with type=$type data=$data');
+
+    if (type == 'chat') {
+      // Expecting data payload like:
+      // {
+      //   "type": "chat",
+      //   "conversationId": "...",
+      //   "otherUserId": "...",
+      //   "otherUserName": "Alice",
+      //   "orderId": "...",        // optional
+      //   "orderTitle": "...",     // optional
+      //   "isOldFormat": "false"   // or "true"
+      // }
+      final extras = <String, dynamic>{
+        'conversationId': data['conversationId']?.toString(),
+        'otherUserId': data['otherUserId']?.toString(),
+        'otherUserName':
+        (data['otherUserName']?.toString().isNotEmpty ?? false)
+            ? data['otherUserName'].toString()
+            : 'User',
+        'orderId': data['orderId']?.toString(),
+        'orderTitle': data['orderTitle']?.toString(),
+        'isOldFormat': _parseBool(data['isOldFormat']),
+      };
+
+      ctx.go('/chat', extra: extras);
+    } else if (type == 'assigned_orders' || type == 'order') {
+      // "order" type also routed to the assigned orders screen
+      ctx.go('/assigned-orders');
+    } else if (type == 'inbox') {
+      ctx.go('/inbox');
+    } else {
+      // Fallback: app notifications screen
+      ctx.go('/notifications');
+    }
+  }
+
+  bool _parseBool(Object? value) {
+    if (value is bool) return value;
+    if (value is String) {
+      final lower = value.toLowerCase();
+      return lower == 'true' || lower == '1' || lower == 'yes';
+    }
+    if (value is num) return value != 0;
+    return false;
   }
 
   // ---- helpers ----
