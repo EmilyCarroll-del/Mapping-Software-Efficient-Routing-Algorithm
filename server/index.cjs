@@ -28,7 +28,9 @@ const processed = new Set();
 const MAX_SEEN = 500;
 function remember(id) {
   processed.add(id);
-  if (processed.size > MAX_SEEN) processed.delete(processed.values().next().value);
+  if (processed.size > MAX_SEEN) {
+    processed.delete(processed.values().next().value);
+  }
 }
 
 function getOtherParticipants(usersArr, senderId) {
@@ -46,7 +48,9 @@ db.collectionGroup("messages").onSnapshot(
 
       // Skip messages created before listener started
       const createdAt = change.doc.createTime;
-      if (createdAt && createdAt.toMillis() <= SERVER_STARTED_AT.toMillis()) continue;
+      if (createdAt && createdAt.toMillis() <= SERVER_STARTED_AT.toMillis()) {
+        continue;
+      }
 
       if (processed.has(msgId)) continue;
 
@@ -56,7 +60,10 @@ db.collectionGroup("messages").onSnapshot(
 
       // parent chat (/chats/{chatId})
       const chatRef = msgRef.parent.parent;
-      if (!chatRef) { remember(msgId); continue; }
+      if (!chatRef) {
+        remember(msgId);
+        continue;
+      }
 
       try {
         const chatSnap = await chatRef.get();
@@ -68,7 +75,10 @@ db.collectionGroup("messages").onSnapshot(
 
         const chat = chatSnap.data() || {};
         const recipients = getOtherParticipants(chat.users, senderId);
-        if (recipients.length === 0) { remember(msgId); continue; }
+        if (recipients.length === 0) {
+          remember(msgId);
+          continue;
+        }
 
         // Look up recipient tokens
         const userDocs = await Promise.all(
@@ -78,9 +88,12 @@ db.collectionGroup("messages").onSnapshot(
           .map((d) => (d.exists ? d.data().fcmToken : null))
           .filter((t) => typeof t === "string" && t.length > 0);
 
-        if (tokens.length === 0) { remember(msgId); continue; }
+        if (tokens.length === 0) {
+          remember(msgId);
+          continue;
+        }
 
-        // 🔎 NEW: fetch sender's display name (fallback to email or 'Someone')
+        // Fetch sender's display name (fallback to email or 'Someone')
         let senderName = "Someone";
         try {
           const senderDoc = await db.collection("users").doc(senderId).get();
@@ -90,19 +103,43 @@ db.collectionGroup("messages").onSnapshot(
           // keep default
         }
 
-        // Build the notification strings
+        // Build human-readable strings
         const title = `${senderName} sent you a message`;
-        const body = text ? (text.length > 80 ? text.slice(0, 80) + "…" : text) : "New message";
+        const body = text
+          ? text.length > 80
+            ? text.slice(0, 80) + "…"
+            : text
+          : "New message";
 
-        // ✅ DATA-ONLY payload (service worker shows the toast)
+        // For mobile, we want order info if you store it on the chat
+        const orderId = (chat.orderId || "").toString();
+        const orderTitle = (chat.orderTitle || "").toString();
+
+        // ✅ Payload that works for BOTH:
+        //   - Web SW (uses data.type = CHAT_MESSAGE, chatId, senderId, title, body)
+        //   - Mobile app (uses notification + data.conversationId, otherUserId, otherUserName, etc.)
         const multicast = {
           tokens,
+          notification: {
+            // Android / iOS system notification (mobile)
+            title,
+            body,
+          },
           data: {
+            // For existing web service worker:
             type: "CHAT_MESSAGE",
             chatId: chatRef.id,
             senderId,
-            title,   // SW uses this as the banner title
-            body,    // SW uses this as the banner body
+            title,
+            body,
+
+            // Extra keys for mobile NotificationService:
+            conversationId: chatRef.id,
+            otherUserId: senderId,
+            otherUserName: senderName,
+            orderId,
+            orderTitle,
+            isOldFormat: "false",
           },
           webpush: { fcmOptions: { link: "/" } },
           android: { priority: "high" },
