@@ -1,4 +1,4 @@
-// server/index.cjs (CommonJS)
+// server/index.cjs
 // Run with: node server/index.cjs
 
 const admin = require("firebase-admin");
@@ -93,17 +93,16 @@ db.collectionGroup("messages").onSnapshot(
           continue;
         }
 
-        // Fetch sender's display name (fallback to email or 'Someone')
+        // 🔎 Sender display name
         let senderName = "Someone";
         try {
           const senderDoc = await db.collection("users").doc(senderId).get();
-          const u = senderDoc.exists ? (senderDoc.data() || {}) : {};
+          const u = senderDoc.exists ? senderDoc.data() || {} : {};
           senderName = u.displayName || u.name || u.email || "Someone";
         } catch (_) {
-          // keep default
+          // ignore
         }
 
-        // Build human-readable strings
         const title = `${senderName} sent you a message`;
         const body = text
           ? text.length > 80
@@ -111,40 +110,53 @@ db.collectionGroup("messages").onSnapshot(
             : text
           : "New message";
 
-        // For mobile, we want order info if you store it on the chat
-        const orderId = (chat.orderId || "").toString();
-        const orderTitle = (chat.orderTitle || "").toString();
-
-        // ✅ Payload that works for BOTH:
-        //   - Web SW (uses data.type = CHAT_MESSAGE, chatId, senderId, title, body)
-        //   - Mobile app (uses notification + data.conversationId, otherUserId, otherUserName, etc.)
+        // ✅ Payload for BOTH web + mobile
         const multicast = {
           tokens,
-          notification: {
-            // Android / iOS system notification (mobile)
-            title,
-            body,
-          },
-          data: {
-            // For existing web service worker:
-            type: "CHAT_MESSAGE",
-            chatId: chatRef.id,
-            senderId,
-            title,
-            body,
 
-            // Extra keys for mobile NotificationService:
-            conversationId: chatRef.id,
-            otherUserId: senderId,
-            otherUserName: senderName,
-            orderId,
-            orderTitle,
-            isOldFormat: "false",
+          // Make Android/iOS show a banner in background:
+          notification: {
+            title,
+            body,
           },
-          webpush: { fcmOptions: { link: "/" } },
-          android: { priority: "high" },
-          apns: { headers: { "apns-priority": "10" } },
+
+          // Data payload for routing on mobile & SW on web
+          data: {
+            type: "CHAT_MESSAGE",      // <- mobile will recognize this
+            chatId: chatRef.id,        // <- conversationId on mobile
+            senderId,
+            senderName,
+            title,
+            body,
+          },
+
+          webpush: {
+            fcmOptions: { link: "/" },
+          },
+
+          android: {
+            priority: "high",
+            notification: {
+              priority: "high",
+            },
+          },
+
+          apns: {
+            headers: { "apns-priority": "10" },
+            payload: {
+              aps: {
+                alert: { title, body },
+                sound: "default",
+              },
+            },
+          },
         };
+
+        console.log("📤 Sending multicast:", {
+          tokensCount: tokens.length,
+          to: msgRef.path,
+          type: "CHAT_MESSAGE",
+        });
 
         const res = await messaging.sendEachForMulticast(multicast);
 
