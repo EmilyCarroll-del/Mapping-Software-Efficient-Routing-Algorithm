@@ -363,24 +363,21 @@ class NotificationService {
     }
 
     final data = message.data;
-    final type = data['type'] as String?; // e.g., "chat", "assigned_orders", etc.
+    final rawType = data['type'] as String?;
+    final type = rawType?.toLowerCase();
 
-    debugPrint('🔔 Handling notification tap with type=$type data=$data');
+    debugPrint('🔔 Handling notification tap with type=$rawType data=$data');
 
-    if (type == 'chat') {
-      // Expecting data payload like:
-      // {
-      //   "type": "chat",
-      //   "conversationId": "...",
-      //   "otherUserId": "...",
-      //   "otherUserName": "Alice",
-      //   "orderId": "...",        // optional
-      //   "orderTitle": "...",     // optional
-      //   "isOldFormat": "false"   // or "true"
-      // }
+    // Treat both "chat" and "CHAT_MESSAGE" as chat-type notifications
+    if (type == 'chat' || type == 'chat_message') {
+      // Accept both conversationId (mobile) and chatId (web)
+      final conversationId =
+          data['conversationId']?.toString() ?? data['chatId']?.toString();
+
       final extras = <String, dynamic>{
-        'conversationId': data['conversationId']?.toString(),
-        'otherUserId': data['otherUserId']?.toString(),
+        'conversationId': conversationId,
+        'otherUserId':
+        data['otherUserId']?.toString() ?? data['senderId']?.toString(),
         'otherUserName':
         (data['otherUserName']?.toString().isNotEmpty ?? false)
             ? data['otherUserName'].toString()
