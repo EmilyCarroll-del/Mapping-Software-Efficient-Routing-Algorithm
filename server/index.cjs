@@ -122,10 +122,19 @@ db.collectionGroup("messages").onSnapshot(
 
           // Data payload for routing on mobile & SW on web
           data: {
-            type: "CHAT_MESSAGE",      // <- mobile will recognize this
-            chatId: chatRef.id,        // <- conversationId on mobile
+            // Type understood by mobile NotificationService
+            type: "CHAT_MESSAGE",
+
+            // Chat / conversation identifier
+            chatId: chatRef.id,
+            conversationId: chatRef.id,
+
+            // Who sent it (used as "other user" on mobile)
             senderId,
-            senderName,
+            otherUserId: senderId,
+            otherUserName: senderName,
+
+            // Title/body also available to the client
             title,
             body,
           },
