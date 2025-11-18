@@ -41,6 +41,7 @@ dependencies:
   image_picker: ^1.0.4
   file_picker: ^6.2.0
   csv: ^6.0.0
+  flutter_typeahead: ^5.2.0
 
 dev_dependencies:
   flutter_test:
@@ -57,3 +58,6 @@ flutter:
   assets:
     - assets/images/
     - assets/icons/
+
+
+#AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74

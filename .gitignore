@@ -86,3 +86,11 @@ coverage/
 
 # Ignore Firebase Admin credentials
 server/serviceAccount.json
+
+# Ignore environment variables (API keys)
+server/.env
+.env
+*.env
+
+node_modules/
+server/node_modules/

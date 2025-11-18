@@ -1,5 +1,6 @@
 import 'package:geocoding/geocoding.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'dart:math';
 import '../models/delivery_address.dart';
@@ -85,17 +86,40 @@ class GeocodingService {
     return results;
   }
 
-  /// Reverse geocode: convert GPS coordinates to address
+  /// Reverse geocode: convert GPS coordinates to address using Google Geocoding API
   static Future<String> reverseGeocode(double latitude, double longitude) async {
     try {
-      final placemarks = await placemarkFromCoordinates(latitude, longitude);
+      final url = Uri.parse('$_googleGeocodingUrl?latlng=$latitude,$longitude&key=$_googleMapsApiKey');
+      final response = await http.get(url);
+
+      if (response.statusCode != 200) {
+        debugPrint('Reverse geocoding HTTP error ${response.statusCode}');
+        return 'Unknown Location';
+      }
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final status = data['status'] as String?;
       
-      if (placemarks.isNotEmpty) {
-        final placemark = placemarks.first;
-        return '${placemark.street}, ${placemark.locality}, ${placemark.administrativeArea} ${placemark.postalCode}';
+      if (status != 'OK') {
+        debugPrint('Reverse geocoding API returned status=$status');
+        return 'Unknown Location';
+      }
+
+      final results = data['results'] as List<dynamic>?;
+      if (results == null || results.isEmpty) {
+        return 'Unknown Location';
+      }
+
+      // Get the first result's formatted address
+      final result = results[0] as Map<String, dynamic>?;
+      if (result != null) {
+        final formattedAddress = result['formatted_address'] as String?;
+        if (formattedAddress != null && formattedAddress.isNotEmpty) {
+          return formattedAddress;
+        }
       }
     } catch (e) {
-      print('Reverse geocoding failed: $e');
+      debugPrint('Reverse geocoding failed: $e');
     }
     
     return 'Unknown Location';
