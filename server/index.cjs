@@ -55,8 +55,8 @@ db.collectionGroup("messages").onSnapshot(
       if (processed.has(msgId)) continue;
 
       const data = change.doc.data() || {};
-      const senderId = (data.senderId || "").toString();
-      const text = (data.message || "").toString();
+      const senderId = String(data.senderId || "");
+      const text = String(data.message || "");
 
       // parent chat (/chats/{chatId})
       const chatRef = msgRef.parent.parent;
@@ -110,6 +110,8 @@ db.collectionGroup("messages").onSnapshot(
             : text
           : "New message";
 
+        const conversationId = chatRef.id;
+
         // ✅ Payload for BOTH web + mobile
         const multicast = {
           tokens,
@@ -120,23 +122,22 @@ db.collectionGroup("messages").onSnapshot(
             body,
           },
 
-          // Data payload for routing on mobile & SW on web
+          // DATA payload:
+          // - `type: CHAT_MESSAGE` kept for the web SW
+          // - `mobileType: chat` + convo/user info for the mobile app
           data: {
-            // Type understood by mobile NotificationService
-            type: "CHAT_MESSAGE",
+            type: "CHAT_MESSAGE",          // used by web SW
+            mobileType: "chat",            // used by mobile
 
-            // Chat / conversation identifier
-            chatId: chatRef.id,
-            conversationId: chatRef.id,
-
-            // Who sent it (used as "other user" on mobile)
+            chatId: conversationId,
+            conversationId: conversationId,
             senderId,
             otherUserId: senderId,
             otherUserName: senderName,
 
-            // Title/body also available to the client
-            title,
-            body,
+            dataTitle: title,
+            dataBody: body,
+            isOldFormat: "false",
           },
 
           webpush: {
