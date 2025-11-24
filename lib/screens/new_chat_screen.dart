@@ -1,8 +1,9 @@
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import 'chat_page.dart';
+import '../services/chat_service.dart';
 
 class NewChatScreen extends StatefulWidget {
   const NewChatScreen({super.key});
@@ -13,8 +14,9 @@ class NewChatScreen extends StatefulWidget {
 
 class _NewChatScreenState extends State<NewChatScreen> {
   final User? currentUser = FirebaseAuth.instance.currentUser;
+  final ChatService _chatService = ChatService();
 
-  // Finds or creates a chat with the selected user and navigates to it
+  // Start a NEW-style conversation in /conversations (not /chats)
   Future<void> _startChatWithUser(String otherUserId, String otherUserName) async {
     if (currentUser == null) return;
     final currentUserId = currentUser!.uid;
@@ -27,51 +29,49 @@ class _NewChatScreenState extends State<NewChatScreen> {
       return;
     }
 
-    // Check if a chat already exists
-    final chatQuery = await FirebaseFirestore.instance
-        .collection('chats')
-        .where('users', whereIn: [
-          [currentUserId, otherUserId],
-          [otherUserId, currentUserId]
-        ])
-        .limit(1)
-        .get();
+    try {
+      // Use the shared ChatService to get or create a conversation
+      final conversationId = await _chatService.createOrGetConversation(
+        otherUserId,
+        orderId: null,
+        orderTitle: null,
+      );
 
-    if (mounted) {
-        // If a chat exists, navigate to it
-        if (chatQuery.docs.isNotEmpty) {
-        final existingChatId = chatQuery.docs.first.id;
-        Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-            builder: (context) => ChatPage(
-                chatId: existingChatId,
-                otherUserName: otherUserName,
-            ),
-            ),
-        );
-        } else {
-        // If no chat exists, create a new one
-        final newChatDoc = await FirebaseFirestore.instance.collection('chats').add({
-            'users': [currentUserId, otherUserId],
-            'lastMessage': 'Chat started.',
-            'lastMessageTime': FieldValue.serverTimestamp(),
-        });
-        Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-            builder: (context) => ChatPage(
-                chatId: newChatDoc.id,
-                otherUserName: otherUserName,
-            ),
-            ),
-        );
-        }
+      if (!mounted) return;
+
+      // Navigate to the new ChatPage API (conversations-based)
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatPage(
+            conversationId: conversationId,
+            otherUserId: otherUserId,
+            otherUserName: otherUserName,
+            orderId: null,
+            orderTitle: null,
+            isOldFormat: false, // new /conversations format
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to start chat: $e')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (currentUser == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Start a new chat')),
+        body: const Center(
+          child: Text('You must be logged in to start a chat.'),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Start a new chat'),
@@ -88,8 +88,10 @@ class _NewChatScreenState extends State<NewChatScreen> {
           }
 
           final users = snapshot.data?.docs ?? [];
+
           // Filter out the current user from the list
-          final otherUsers = users.where((doc) => doc.id != currentUser?.uid).toList();
+          final otherUsers =
+          users.where((doc) => doc.id != currentUser!.uid).toList();
 
           if (otherUsers.isEmpty) {
             return const Center(child: Text('No other users found.'));
@@ -100,13 +102,21 @@ class _NewChatScreenState extends State<NewChatScreen> {
             itemBuilder: (context, index) {
               final userDoc = otherUsers[index];
               final userData = userDoc.data() as Map<String, dynamic>?;
-              final userName = userData?['email'] ?? 'Unknown User';
+
+              // Try to resolve a decent display name
+              final email = (userData?['email'] as String?) ?? '';
+              final name = (userData?['name'] as String?) ?? '';
+              final userName =
+              name.isNotEmpty ? name : (email.isNotEmpty ? email : 'Unknown User');
 
               return ListTile(
                 leading: CircleAvatar(
-                  child: Text(userName.isNotEmpty ? userName[0].toUpperCase() : '?'),
+                  child: Text(
+                    userName.isNotEmpty ? userName[0].toUpperCase() : '?',
+                  ),
                 ),
                 title: Text(userName),
+                subtitle: email.isNotEmpty ? Text(email) : null,
                 onTap: () => _startChatWithUser(userDoc.id, userName),
               );
             },
