@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -37,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   int _currentIndex = 0;
 
+  late final StreamSubscription<User?> _authSub;
+
   void _onTabTapped(int index) {
     setState(() {
       _currentIndex = index;
@@ -44,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     switch (index) {
       case 0:
+      // home
         break;
       case 1:
         context.go('/inbox');
@@ -60,14 +65,20 @@ class _HomeScreenState extends State<HomeScreen> {
     _initializeLocation();
     _loadOrderStatistics();
 
-    FirebaseAuth.instance.authStateChanges().listen((User? user) {
-      if (mounted) {
-        setState(() {});
-        if (user != null) {
-          _loadOrderStatistics();
-        }
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (!mounted) return;
+      setState(() {}); // rebuild to reflect login/logout state
+      if (user != null) {
+        _loadOrderStatistics();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _authSub.cancel();
+    _mapController?.dispose();
+    super.dispose();
   }
 
   void _loadOrderStatistics() {
@@ -216,7 +227,9 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _hasCenteredOnce = true;
       });
-    } catch (e) {}
+    } catch (e) {
+      // silently ignore for now
+    }
   }
 
   @override
@@ -233,16 +246,20 @@ class _HomeScreenState extends State<HomeScreen> {
               if (_currentLocation != null) {
                 controller.animateCamera(
                   CameraUpdate.newLatLng(
-                    LatLng(_currentLocation!.latitude!,
-                        _currentLocation!.longitude!),
+                    LatLng(
+                      _currentLocation!.latitude!,
+                      _currentLocation!.longitude!,
+                    ),
                   ),
                 );
               }
             },
             initialCameraPosition: CameraPosition(
               target: _currentLocation != null
-                  ? LatLng(_currentLocation!.latitude!,
-                  _currentLocation!.longitude!)
+                  ? LatLng(
+                _currentLocation!.latitude!,
+                _currentLocation!.longitude!,
+              )
                   : _defaultLocation,
               zoom: 15,
             ),
@@ -314,6 +331,7 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.all(16.0),
           child: Row(
             children: [
+              // App title
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -326,8 +344,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         fontWeight: FontWeight.bold,
                         shadows: [
                           Shadow(
-                              color: Colors.black.withOpacity(0.5),
-                              blurRadius: 4),
+                            color: Colors.black.withOpacity(0.5),
+                            blurRadius: 4,
+                          ),
                         ],
                       ),
                     ),
@@ -341,18 +360,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              if (isLoggedIn) _buildLocationBadge(),
-              const SizedBox(width: 8),
-              if (isLoggedIn)
+
+              // Right-side actions
+              if (isLoggedIn) ...[
+                _buildLocationBadge(),
+                const SizedBox(width: 8),
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: kPrimaryColor,
                   child: IconButton(
-                    icon: const Icon(Icons.notifications,
-                        color: Colors.white, size: 20),
+                    icon: const Icon(
+                      Icons.notifications,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                     onPressed: () => context.go('/notifications'),
                   ),
                 ),
+              ] else ...[
+                ElevatedButton.icon(
+                  onPressed: () => context.go('/login'),
+                  icon: const Icon(Icons.login, size: 18),
+                  label: const Text('Login'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -411,8 +450,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   _buildStatsCard(),
                   const SizedBox(height: 16),
-
-                  // Only ONE button now (Assigned Orders)
                   Row(
                     children: [
                       Expanded(
@@ -432,7 +469,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
-
                   const SizedBox(height: 8),
                 ],
               ),
@@ -460,23 +496,45 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _buildQuickStat('Total Orders', '$_totalOrders',
-              Icons.assignment, kPrimaryColor),
-          Container(
-              width: 1, height: 30, color: Colors.grey.withOpacity(0.3)),
-          _buildQuickStat('In Progress', '$_inProgressOrders',
-              Icons.hourglass_empty, Colors.orange),
-          Container(
-              width: 1, height: 30, color: Colors.grey.withOpacity(0.3)),
           _buildQuickStat(
-              'Completed', '$_completedOrders', Icons.check_circle, Colors.green),
+            'Total Orders',
+            '$_totalOrders',
+            Icons.assignment,
+            kPrimaryColor,
+          ),
+          Container(
+            width: 1,
+            height: 30,
+            color: Colors.grey.withOpacity(0.3),
+          ),
+          _buildQuickStat(
+            'In Progress',
+            '$_inProgressOrders',
+            Icons.hourglass_empty,
+            Colors.orange,
+          ),
+          Container(
+            width: 1,
+            height: 30,
+            color: Colors.grey.withOpacity(0.3),
+          ),
+          _buildQuickStat(
+            'Completed',
+            '$_completedOrders',
+            Icons.check_circle,
+            Colors.green,
+          ),
         ],
       ),
     );
   }
 
   Widget _buildQuickStat(
-      String label, String value, IconData icon, Color color) {
+      String label,
+      String value,
+      IconData icon,
+      Color color,
+      ) {
     return Column(
       children: [
         Icon(icon, color: color, size: 20),
