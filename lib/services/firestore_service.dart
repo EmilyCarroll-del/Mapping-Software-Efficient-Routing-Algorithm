@@ -323,18 +323,70 @@ class FirestoreService {
     return doc.exists;
   }
 
+  /// Assign drivers to an order AND create notifications for newly assigned drivers.
   Future<void> assignOrderToDrivers(String orderId, List<String> driverIds) async {
     final orderRef = _db.collection(_ordersCollectionPath).doc(orderId);
+
+    List<String> previousDriverIds = [];
+    OrderModel? orderModel;
+
+    // Update order + capture previous driverIds and order data
     await _db.runTransaction((transaction) async {
       final orderSnapshot = await transaction.get(orderRef);
       if (!orderSnapshot.exists) throw Exception("Order not found!");
-      final order = OrderModel.fromJson(orderSnapshot.data()!);
+
+      final data = orderSnapshot.data()!;
+      orderModel = OrderModel.fromJson(data);
+
+      // previous driver ids before this assignment
+      previousDriverIds = List<String>.from((data['driverIds'] ?? const <dynamic>[]) as List<dynamic>);
 
       final newStatus = driverIds.isEmpty ? 'pending' : 'assigned';
 
-      transaction.update(orderRef, {'driverIds': driverIds, 'status': newStatus});
-      // TODO: Update addresses as well
+      transaction.update(orderRef, {
+        'driverIds': driverIds,
+        'status': newStatus,
+      });
+      // TODO: Update addresses as well if needed
     });
+
+    // Figure out which drivers are *newly* assigned
+    final newlyAssigned = driverIds
+        .where((id) => !previousDriverIds.contains(id))
+        .toList();
+
+    // If no new drivers were added, nothing to notify
+    if (newlyAssigned.isEmpty) {
+      return;
+    }
+
+    final pickupSummary =
+        orderModel?.pickUpAddress.fullAddress ?? 'a new order';
+
+    // Create notifications for newly assigned drivers
+    final notificationsRef = _db.collection('notifications');
+    final batch = _db.batch();
+
+    for (final driverId in newlyAssigned) {
+      final docRef = notificationsRef.doc();
+      batch.set(docRef, {
+        'userId': driverId,
+        'type': 'order', // used by the Orders tab in the mobile notifications UI
+        'title': 'New Order Assigned',
+        'message': 'You have been assigned a new order: $pickupSummary',
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'actionType': 'open_order',
+        'actionData': {
+          'orderId': orderId,
+        },
+        'metadata': {
+          'source': 'web_assignOrderToDrivers',
+        },
+      });
+    }
+
+    await batch.commit();
   }
 
   Future<void> unassignOrder(String orderId) async {
