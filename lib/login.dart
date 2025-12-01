@@ -6,6 +6,7 @@ import 'services/profile_service.dart';
 import 'forgot_password.dart';
 import 'colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+// import 'widgets/loading_overlay.dart'; // Removed
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -18,7 +19,7 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  bool _isLoading = false;
+  bool _isLoading = false; // Restored
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
@@ -254,12 +255,16 @@ class _LoginPageState extends State<LoginPage> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: _isLoading ? null : _loginWithGoogle,
-                  icon: const Icon(
+                  icon: _isLoading ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ) : const Icon(
                     Icons.login,
                     size: 20,
                     color: Colors.blue,
                   ),
-                  label: const Text('Sign in with Google'),
+                  label: Text(_isLoading ? 'Signing in...' : 'Sign in with Google'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
                     shape: RoundedRectangleBorder(

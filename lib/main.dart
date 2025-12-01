@@ -19,6 +19,7 @@ import 'screens/notifications_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/route_history_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/splash_screen.dart';
 import 'services/notification_service.dart';
 import 'signup.dart';
 import 'widgets/bottom_navigation_bar.dart';
@@ -135,37 +136,32 @@ class GraphGoApp extends StatelessWidget {
 }
 
 final GoRouter _router = GoRouter(
+  initialLocation: '/splash',
   refreshListenable: _AuthStateNotifier(),
   redirect: (BuildContext context, GoRouterState state) {
     final user = FirebaseAuth.instance.currentUser;
     final isLoggedIn = user != null;
     final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
+    final isSplash = state.matchedLocation == '/splash';
+
+    if (isSplash) {
+      return null;
+    }
 
     // If user is logged in and trying to access login/signup pages, redirect to home
     if (isLoggedIn && isLoggingIn) {
       return '/';
     }
 
-    // COMPANY CODE SYSTEM - USER TYPE RULES:
-    //
-    // Mobile app is exclusively for drivers. Admin functionality is web-only.
-    //
-    // DRIVERS (Mobile App):
-    //   - All mobile app signups automatically set userType: 'driver'
-    //   - Company code is OPTIONAL for drivers
-    //     * With companyCode: Linked to company (can only work with matching admins)
-    //     * Without companyCode: Freelancer (can work with any admin)
-    //     * Company code can be added/updated in profile screen
-    //
-    // ADMINS (Web App Only):
-    //   - All admin users MUST have a companyCode (required during web app signup)
-    //   - Company Admins: Share companyCode (e.g., FedEx, DHL, UPS, Amazon)
-    //   - Individual Admins: Have unique companyCode (freelancers looking for drivers)
-
-    // No automatic redirect to login - let the home screen handle it
     return null; // No redirect needed
   },
   routes: <RouteBase>[
+    GoRoute(
+      path: '/splash',
+      builder: (BuildContext context, GoRouterState state) {
+        return const SplashScreen();
+      },
+    ),
     ShellRoute(
       builder: (context, state, child) {
         return Scaffold(

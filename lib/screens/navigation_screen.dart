@@ -326,12 +326,16 @@ class NavigationScreen extends StatefulWidget {
   State<NavigationScreen> createState() => _NavigationScreenState();
 }
 
-class _NavigationScreenState extends State<NavigationScreen> {
+class _NavigationScreenState extends State<NavigationScreen> with SingleTickerProviderStateMixin {
   GoogleMapController? _mapController;
   NavigationEngine? _navigationEngine;
 
   final Set<Polyline> _polylines = {};
   final Set<Marker> _markers = {};
+  Set<Circle> _circles = {}; // For the pulsing effect
+  
+  late AnimationController _pulseController;
+  BitmapDescriptor? _customDriverIcon;
   
   String _currentInstruction = "Preparing your route...";
   double _distanceToNextTurn = 0.0;
@@ -341,8 +345,106 @@ class _NavigationScreenState extends State<NavigationScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // Initialize pulse animation
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3), 
+    )..repeat();
+    
+    _loadCustomDriverIcon();
     _setupMap();
     _startNavigation();
+  }
+  
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _navigationEngine?.stop();
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadCustomDriverIcon() async {
+    try {
+      final icon = await BitmapDescriptor.fromAssetImage(
+        const ImageConfiguration(size: Size(40, 40)),
+        'assets/icons/tringle-icon.png',
+      );
+      if (mounted) {
+        setState(() {
+          _customDriverIcon = icon;
+        });
+      }
+    } catch (e) {
+      print('Error loading custom driver icon: $e');
+    }
+  }
+  
+  void _updateDriverMarkerAndPulse(Position position) {
+    final latLng = LatLng(position.latitude, position.longitude);
+    
+    // Update Driver Marker
+    final driverMarker = Marker(
+      markerId: const MarkerId('driver_location'),
+      position: latLng,
+      rotation: position.heading,
+      icon: _customDriverIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+      anchor: const Offset(0.5, 0.5),
+      flat: true,
+      zIndex: 100, // Ensure it's on top
+    );
+
+    // Update Pulse Circles
+    // DOUBLE RIPPLE EFFECT (Copied from HomeScreen logic)
+    final double baseRadius = 15.0; // Slightly smaller for nav screen if needed, or keep same
+    final double maxRadius = 100.0; // Dynamic radius based on context? Fixed is fine.
+
+    // Wave 1
+    final double progress1 = _pulseController.value;
+    final double radius1 = baseRadius + (maxRadius - baseRadius) * progress1;
+    final double opacity1 = (1.0 - progress1) * 0.6;
+
+    // Wave 2 (Offset by 50%)
+    final double progress2 = (_pulseController.value + 0.5) % 1.0;
+    final double radius2 = baseRadius + (maxRadius - baseRadius) * progress2;
+    final double opacity2 = (1.0 - progress2) * 0.6;
+
+    final circle1 = Circle(
+      circleId: const CircleId('pulse_circle_1'),
+      center: latLng,
+      radius: radius1,
+      fillColor: Colors.greenAccent.withOpacity(opacity1),
+      strokeColor: Colors.greenAccent.withOpacity(opacity1 * 0.5),
+      strokeWidth: 1,
+    );
+
+    final circle2 = Circle(
+      circleId: const CircleId('pulse_circle_2'),
+      center: latLng,
+      radius: radius2,
+      fillColor: Colors.greenAccent.withOpacity(opacity2),
+      strokeColor: Colors.greenAccent.withOpacity(opacity2 * 0.5),
+      strokeWidth: 1,
+    );
+    
+    // Solid Core Glow
+    final coreCircle = Circle(
+      circleId: const CircleId('core_circle'),
+      center: latLng,
+      radius: 20.0,
+      fillColor: Colors.green.withOpacity(0.5),
+      strokeColor: Colors.white.withOpacity(0.8),
+      strokeWidth: 2,
+    );
+
+    if (mounted) {
+      setState(() {
+        _markers.removeWhere((m) => m.markerId.value == 'driver_location');
+        _markers.add(driverMarker);
+        _circles = {circle1, circle2, coreCircle};
+      });
+    }
   }
 
   void _setupMap() {
@@ -391,6 +493,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
         if (mounted) setState(() => _distanceToNextTurn = distance);
       },
       onPositionUpdated: (position) {
+        // Update the map marker and pulsing effect
+        _updateDriverMarkerAndPulse(position);
+        
         _mapController?.animateCamera(
           CameraUpdate.newCameraPosition(
             CameraPosition(
@@ -403,14 +508,15 @@ class _NavigationScreenState extends State<NavigationScreen> {
         );
       },
     );
+    
+    // Need to trigger animation updates
+    _pulseController.addListener(() {
+      if (_navigationEngine?._lastKnownPosition != null) {
+         _updateDriverMarkerAndPulse(_navigationEngine!._lastKnownPosition!);
+      }
+    });
+    
     _navigationEngine!.start();
-  }
-
-  @override
-  void dispose() {
-    _navigationEngine?.stop();
-    _mapController?.dispose();
-    super.dispose();
   }
   
   String _formatDistance(double meters) {
@@ -489,7 +595,9 @@ class _NavigationScreenState extends State<NavigationScreen> {
             ),
             polylines: _polylines,
             markers: _markers,
-            myLocationEnabled: !_isEmulator,
+            circles: _circles, // Add the circles here
+            // Disable built-in MyLocation because we are drawing our own driver marker
+            myLocationEnabled: false,
             myLocationButtonEnabled: false,
             buildingsEnabled: true,
             zoomControlsEnabled: false,

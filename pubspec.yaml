@@ -33,6 +33,7 @@ dependencies:
   url_launcher: ^6.2.2
   geolocator: ^12.0.0
   flutter_tts: ^4.0.2
+  flutter_native_splash: ^2.3.1
 
 dev_dependencies:
   flutter_test:
@@ -65,3 +66,9 @@ flutter:
   assets:
     - assets/icons/
     - .env
+
+flutter_native_splash:
+  color: "#1B3D2F"
+  image: assets/icons/img_1.png
+  branding: assets/icons/img_1.png
+  fullscreen: true

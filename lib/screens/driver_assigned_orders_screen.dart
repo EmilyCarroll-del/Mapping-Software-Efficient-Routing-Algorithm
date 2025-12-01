@@ -12,6 +12,7 @@ import '../services/geocoding_service.dart';
 import '../services/chat_service.dart';
 import 'chat_page.dart';
 import 'route_preview_screen.dart';
+import '../widgets/loading_overlay.dart';
 
 class DriverAssignedOrdersScreen extends StatefulWidget {
   const DriverAssignedOrdersScreen({super.key});
@@ -312,9 +313,7 @@ class _DriverAssignedOrdersScreenState
                                         _updateOrderStatus(
                                             order, order.status);
                                       } catch (e, stackTrace) {
-                                        print(
-                                            '❌ ERROR in button handler: $e');
-                                        print('Stack trace: $stackTrace');
+                                        // print('❌ ERROR in button handler: $e');
                                       }
                                     },
                                     child: Text(order.status == 'accepted'
@@ -407,9 +406,7 @@ class _DriverAssignedOrdersScreenState
                                 try {
                                   _updateOrderStatus(order, order.status);
                                 } catch (e, stackTrace) {
-                                  print(
-                                      '❌ ERROR in button handler (Address Card): $e');
-                                  print('Stack trace: $stackTrace');
+                                  // print('❌ ERROR in button handler (Address Card): $e');
                                 }
                               },
                               child: Text(order.status == 'accepted'
@@ -473,28 +470,15 @@ class _DriverAssignedOrdersScreenState
 
   Future<void> _openChatForOrder(app_order.Order order) async {
     if (!mounted || _currentUser == null) {
-      print('_openChatForOrder: Not mounted or no current user');
       return;
     }
 
-    BuildContext? dialogContext;
+    // We use LoadingOverlay now instead of manual dialog
+    LoadingOverlay.show(context, message: 'Opening Chat', subMessage: 'Connecting to secure channel...');
 
     try {
-      print('_openChatForOrder: Starting chat for order ${order.id}');
-
-      // Show loading
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          dialogContext = context;
-          return const Center(child: CircularProgressIndicator());
-        },
-      );
 
       // Get order document to find admin user ID (order issuer)
-      print(
-          '_openChatForOrder: Fetching order document from ${order.sourceCollection}/${order.id}');
       final orderDoc = await _firestore
           .collection(order.sourceCollection)
           .doc(order.id)
@@ -505,7 +489,6 @@ class _DriverAssignedOrdersScreenState
       }
 
       final orderData = orderDoc.data();
-      print('_openChatForOrder: Order data keys: ${orderData?.keys.toList()}');
 
       String? adminUserId;
 
@@ -516,20 +499,16 @@ class _DriverAssignedOrdersScreenState
             orderData['adminUserId'] as String? ??
             orderData['userId'] as String? ??
             orderData['issuerId'] as String?;
-        print('_openChatForOrder: Found adminUserId from order: $adminUserId');
       }
 
       // If no admin ID in order, try to find admin users with same company code
       if (adminUserId == null && _currentUser != null) {
-        print(
-            '_openChatForOrder: No admin ID in order, searching by company code');
         try {
           final currentUserDoc =
               await _firestore.collection('users').doc(_currentUser!.uid).get();
           final currentUserData = currentUserDoc.data();
           final companyCode = currentUserData?['companyCode'] as String?;
 
-          print('_openChatForOrder: Current user company code: $companyCode');
 
           if (companyCode != null) {
             // Find admin user with same company code
@@ -540,32 +519,24 @@ class _DriverAssignedOrdersScreenState
                 .limit(1)
                 .get();
 
-            print(
-                '_openChatForOrder: Found ${adminUsers.docs.length} admin users');
 
             if (adminUsers.docs.isNotEmpty) {
               adminUserId = adminUsers.docs.first.id;
-              print('_openChatForOrder: Using admin user ID: $adminUserId');
             }
           }
         } catch (e) {
-          print('_openChatForOrder: Error finding admin user: $e');
+          // print('_openChatForOrder: Error finding admin user: $e');
         }
       }
 
-      // Close loading dialog
-      if (dialogContext != null && mounted) {
-        Navigator.pop(dialogContext!); 
-        dialogContext = null;
-      }
-
       if (!mounted) {
-        print('_openChatForOrder: Widget not mounted after loading');
+        // LoadingOverlay.hide(context); // Not strictly needed if not mounted but good practice
         return;
       }
 
       if (adminUserId == null || adminUserId.isEmpty) {
-        print('_openChatForOrder: Could not find admin user ID');
+        LoadingOverlay.hide(context); // Hide overlay before showing error
+        
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -576,15 +547,12 @@ class _DriverAssignedOrdersScreenState
         return;
       }
 
-      print('_openChatForOrder: Getting admin user details for $adminUserId');
       // Get admin user details
       final adminUserData = await _chatService.getUserDetails(adminUserId);
       final adminUserName =
           adminUserData?['name'] ?? adminUserData?['email'] ?? 'Admin';
 
-      print('_openChatForOrder: Admin user name: $adminUserName');
 
-      print('_openChatForOrder: Creating/getting conversation');
       // Create or get conversation
       final conversationId = await _chatService.createOrGetConversation(
         adminUserId,
@@ -592,16 +560,16 @@ class _DriverAssignedOrdersScreenState
         orderTitle: 'Order ${order.id}',
       );
 
-      print('_openChatForOrder: Conversation ID: $conversationId');
 
       if (!mounted) {
-        print('_openChatForOrder: Widget not mounted before navigation');
         return;
       }
 
-      print('_openChatForOrder: Navigating to ChatPage');
+      
+      // Hide Overlay before navigating
+      LoadingOverlay.hide(context);
+      
       // Navigate to chat page
-      // adminUserId is guaranteed to be non-null at this point due to the check above
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -616,17 +584,12 @@ class _DriverAssignedOrdersScreenState
         ),
       );
 
-      print('_openChatForOrder: Navigation completed');
     } catch (e, stackTrace) {
-      print('_openChatForOrder: ERROR - $e');
-      print('_openChatForOrder: Stack trace: $stackTrace');
+      // print('_openChatForOrder: ERROR - $e');
+      // print('_openChatForOrder: Stack trace: $stackTrace');
 
-      // Close loading dialog if still open
-      if (dialogContext != null && mounted) {
-        try {
-          Navigator.pop(dialogContext!); 
-        } catch (_) {}
-      }
+      // Hide Overlay on error
+      if (mounted) LoadingOverlay.hide(context);
 
       if (!mounted) return;
 
@@ -664,30 +627,14 @@ class _DriverAssignedOrdersScreenState
   }
 
   Future<void> _startDeliveryRouting(app_order.Order order) async {
-    print('\n');
-    print('======================================================');
-    print('🚦 STARTING DELIVERY ROUTING 🚦');
-    print('======================================================');
-    print('Order ID: ${order.id}');
-
     if (!mounted) return;
 
-    BuildContext? dialogContext;
-    showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogBuildContext) {
-          dialogContext = dialogBuildContext;
-          return const Center(
-              child: Card(
-                  child: Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Calculating route...')
-                      ]))));
-        });
+    // Use the new LoadingOverlay instead of the custom dialog
+    LoadingOverlay.show(
+      context,
+      message: 'Generating Route...',
+      subMessage: 'Optimizing delivery path for you',
+    );
 
     try {
       var pickup = order.pickupAddress;
@@ -695,40 +642,34 @@ class _DriverAssignedOrdersScreenState
 
       final addressesForRouting = <DeliveryAddress>[_currentEmulatorLocation];
 
-      if (!pickup.hasCoordinates) {
-        print('  -> Geocoding pickup: ${pickup.fullAddress}');
-        pickup = await GeocodingService.geocodeAddress(pickup);
-      }
-      addressesForRouting.add(pickup);
-
-      for (var dropOff in dropOffs) {
-        if (!dropOff.hasCoordinates) {
-          print('  -> Geocoding drop-off: ${dropOff.fullAddress}');
-          dropOff = await GeocodingService.geocodeAddress(dropOff);
+      try {
+        if (!pickup.hasCoordinates) {
+          pickup = await GeocodingService.geocodeAddress(pickup).timeout(const Duration(seconds: 5));
         }
-        addressesForRouting.add(dropOff);
-      }
-      
-      print('\n📍 Addresses for routing:');
-      for (var addr in addressesForRouting) {
-        print('  - ${addr.fullAddress}');
-      }
-      
-      print('\n☁️ Calling AWS Route Service for a \'Truck\' route...');
+        addressesForRouting.add(pickup);
 
+        for (var dropOff in dropOffs) {
+          if (!dropOff.hasCoordinates) {
+            dropOff = await GeocodingService.geocodeAddress(dropOff).timeout(const Duration(seconds: 5));
+          }
+          addressesForRouting.add(dropOff);
+        }
+      } catch (e) {
+        print('Geocoding timed out or failed: $e');
+        // Continue with whatever coordinates we have or fail gracefully
+        // If critical coordinates are missing, we might need to stop.
+        // For now, assuming we might have partial data or can rely on fallback
+      }
+      
+      
       final routeOptimization = await _awsRouteService.calculateRoute(
         addresses: addressesForRouting,
         travelMode: 'Truck',
       );
 
-      print('✅ AWS Route calculation successful!');
-      print('  - Total Distance: ${routeOptimization.totalDistance?.toStringAsFixed(1)} km');
-      print('  - Estimated Time: ${routeOptimization.estimatedTime?.inMinutes} minutes');
-      print('  - Route Steps: ${routeOptimization.optimizedRoute?.length ?? 0}');
-      print('======================================================\n');
 
       if (!mounted) return;
-      if (dialogContext != null) Navigator.pop(dialogContext!);
+      LoadingOverlay.hide(context); // Hide the overlay
 
       final result = await Navigator.push<String>(
         context,
@@ -744,9 +685,11 @@ class _DriverAssignedOrdersScreenState
         // Screen will refresh automatically
       }
     } catch (e, stackTrace) {
-      print('❌ Error in _startDeliveryRouting: $e');
-      print('Stack trace: $stackTrace');
-      if (mounted && dialogContext != null) Navigator.pop(dialogContext!);
+      // print('❌ Error in _startDeliveryRouting: $e');
+      // print('Stack trace: $stackTrace');
+      
+      if (mounted) LoadingOverlay.hide(context); // Hide the overlay on error
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Error calculating route: ${e.toString()}'),

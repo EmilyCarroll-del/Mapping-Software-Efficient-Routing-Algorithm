@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -18,25 +21,36 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   GoogleMapController? _mapController;
-  Location _location = Location();
+  final Location _location = Location();
   LocationData? _currentLocation;
   bool _isLocationLoading = true;
   bool _locationPermissionGranted = false;
-  static const LatLng _defaultLocation = LatLng(40.7143, -73.5994); // Hofstra University, Hempstead, NY
+
+  // Hofstra University, Hempstead, NY
+  static const LatLng _defaultLocation = LatLng(40.7143, -73.5994);
+
   Set<Marker> _markers = {};
+  Set<Circle> _circles = {}; // For the pulsing effect
+  
+  // Animation for pulse
+  late AnimationController _pulseController;
+  
   bool _hasCenteredOnce = false;
   bool _followMe = true;
+
   // If true, keep the map centered on Hofstra University (fixed demo location)
   bool _useFixedHofstra = true;
-  
+
+  BitmapDescriptor? _customMarkerIcon;
+
   // Real order statistics
   final FirestoreService _firestoreService = FirestoreService();
   int _totalOrders = 0;
   int _completedOrders = 0;
   int _inProgressOrders = 0;
-  
+
   // Bottom navigation
   int _currentIndex = 0;
 
@@ -44,10 +58,10 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _currentIndex = index;
     });
-    
+
     switch (index) {
       case 0:
-        // Already on home
+      // Already on home
         break;
       case 1:
         context.go('/inbox');
@@ -61,9 +75,23 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeLocation();
-    _loadOrderStatistics();
     
+    // Initialize pulse animation
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3), // Slower duration for double wave
+    )..repeat();
+    
+    // Listen to animation to update the circle
+    _pulseController.addListener(() {
+      if (_currentLocation != null) {
+        _updatePulseCircle(_currentLocation!);
+      }
+    });
+
+    _setup(); // Ensure marker icon loads before location-based markers
+    _loadOrderStatistics();
+
     // Listen to authentication state changes
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
       if (mounted) {
@@ -73,6 +101,98 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     });
+  }
+  
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  void _updatePulseCircle(LocationData locationData) {
+    if (locationData.latitude == null || locationData.longitude == null) return;
+    
+    // DOUBLE RIPPLE EFFECT
+    // We generate two waves offset by 0.5 phase
+    final double baseRadius = 20.0;
+    final double maxRadius = 150.0; // even larger max radius
+
+    // Wave 1
+    final double progress1 = _pulseController.value;
+    final double radius1 = baseRadius + (maxRadius - baseRadius) * progress1;
+    final double opacity1 = (1.0 - progress1) * 0.6;
+
+    // Wave 2 (Offset by 50%)
+    final double progress2 = (_pulseController.value + 0.5) % 1.0;
+    final double radius2 = baseRadius + (maxRadius - baseRadius) * progress2;
+    final double opacity2 = (1.0 - progress2) * 0.6;
+    
+    final circle1 = Circle(
+      circleId: const CircleId('pulse_circle_1'),
+      center: LatLng(locationData.latitude!, locationData.longitude!),
+      radius: radius1,
+      fillColor: Colors.greenAccent.withOpacity(opacity1),
+      strokeColor: Colors.greenAccent.withOpacity(opacity1 * 0.5),
+      strokeWidth: 1,
+    );
+
+    final circle2 = Circle(
+      circleId: const CircleId('pulse_circle_2'),
+      center: LatLng(locationData.latitude!, locationData.longitude!),
+      radius: radius2,
+      fillColor: Colors.greenAccent.withOpacity(opacity2),
+      strokeColor: Colors.greenAccent.withOpacity(opacity2 * 0.5),
+      strokeWidth: 1,
+    );
+    
+    // Solid Core Glow (Behind the triangle)
+    final coreCircle = Circle(
+      circleId: const CircleId('core_circle'),
+      center: LatLng(locationData.latitude!, locationData.longitude!),
+      radius: 30.0, // Larger core
+      fillColor: Colors.green.withOpacity(0.5), // More visible core
+      strokeColor: Colors.white.withOpacity(0.8), // Defined rim
+      strokeWidth: 2,
+    );
+
+    setState(() {
+      _circles = {circle1, circle2, coreCircle};
+    });
+  }
+
+  /// Ensures we load the custom marker before we start placing markers on the map.
+  Future<void> _setup() async {
+    await _loadCustomMarker();
+    await _initializeLocation();
+  }
+
+  // Load custom marker (simplified, no baked-in glow needed since we use Circle now)
+  Future<void> _loadCustomMarker() async {
+    try {
+      // Standard size icon, the glow is handled by the map Circles
+      final icon = await BitmapDescriptor.fromAssetImage(
+        const ImageConfiguration(size: Size(40, 40)),
+        'assets/icons/tringle-icon.png',
+      );
+      
+      if (!mounted) return;
+      setState(() {
+        _customMarkerIcon = icon;
+      });
+
+      // If we already know the location (e.g., in fixed Hofstra mode),
+      // update the marker to use the loaded icon.
+      if (_currentLocation != null) {
+        await _updateDriverMarker(_currentLocation!);
+      }
+    } catch (e) {
+      print('Error loading custom marker icon: $e');
+      if (!mounted) return;
+      setState(() {
+        _customMarkerIcon =
+            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
+      });
+    }
   }
 
   void _loadOrderStatistics() {
@@ -107,6 +227,34 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Future<void> _updateDriverMarker(LocationData locationData) async {
+    if (locationData.latitude == null || locationData.longitude == null) return;
+    
+    // Update the pulse circle position immediately
+    _updatePulseCircle(locationData);
+
+    // Use custom icon if loaded, otherwise fallback to default.
+    final icon =
+        _customMarkerIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
+
+    final newMarker = Marker(
+      markerId: const MarkerId('driver_location'),
+      position: LatLng(locationData.latitude!, locationData.longitude!),
+      icon: icon,
+      rotation: locationData.heading ?? 0.0,
+      flat: true, // Makes the marker rotate with the map
+      anchor: const Offset(0.5, 0.5), // Center the icon
+      infoWindow: const InfoWindow(title: 'You are here'),
+    );
+
+    if (mounted) {
+      setState(() {
+        _markers.removeWhere((m) => m.markerId.value == 'driver_location');
+        _markers.add(newMarker);
+      });
+    }
+  }
+
   Future<void> _initializeLocation() async {
     try {
       print('🗺️ Initializing location...');
@@ -119,6 +267,10 @@ class _HomeScreenState extends State<HomeScreen> {
           'accuracy': 100.0,
           'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
         });
+
+        // Add initial marker
+        await _updateDriverMarker(_currentLocation!);
+
         setState(() {
           _isLocationLoading = false;
           _locationPermissionGranted = false;
@@ -137,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // Ensure location service is enabled
       bool serviceEnabled = await _location.serviceEnabled();
       print('📍 Location service enabled: $serviceEnabled');
-      
+
       if (!serviceEnabled) {
         serviceEnabled = await _location.requestService();
         print('📍 Location service requested: $serviceEnabled');
@@ -146,7 +298,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // Request permission
       PermissionStatus permissionGranted = await _location.hasPermission();
       print('🔐 Location permission status: $permissionGranted');
-      
+
       if (permissionGranted == PermissionStatus.denied) {
         permissionGranted = await _location.requestPermission();
         print('🔐 Location permission requested: $permissionGranted');
@@ -173,13 +325,18 @@ class _HomeScreenState extends State<HomeScreen> {
       // Get current location once
       final current = await _location.getLocation();
       _currentLocation = current;
+
+      await _updateDriverMarker(current);
+
       setState(() {
         _isLocationLoading = false;
         _locationPermissionGranted = true;
       });
-      
+
       // Center camera once to current position
-      if (_mapController != null && current.latitude != null && current.longitude != null) {
+      if (_mapController != null &&
+          current.latitude != null &&
+          current.longitude != null) {
         _mapController!.animateCamera(
           CameraUpdate.newLatLng(
             LatLng(current.latitude!, current.longitude!),
@@ -188,18 +345,24 @@ class _HomeScreenState extends State<HomeScreen> {
         _hasCenteredOnce = true;
       }
 
-      // Listen to location changes and update blue dot (Google handles dot),
-      // optionally keep camera centered initially
+      // Listen to location changes
       _location.onLocationChanged.listen((LocationData locationData) {
         if (mounted) {
-          print('🔄 Location updated: ${locationData.latitude}, ${locationData.longitude}');
+          print(
+              '🔄 Location updated: ${locationData.latitude}, ${locationData.longitude}');
           _currentLocation = locationData;
+
+          // Update marker position
+          _updateDriverMarker(locationData);
+
           if (_mapController != null) {
             if (!_hasCenteredOnce || _followMe) {
               _mapController!.animateCamera(
                 CameraUpdate.newLatLng(
-                  LatLng(locationData.latitude ?? _defaultLocation.latitude,
-                      locationData.longitude ?? _defaultLocation.longitude),
+                  LatLng(
+                    locationData.latitude ?? _defaultLocation.latitude,
+                    locationData.longitude ?? _defaultLocation.longitude,
+                  ),
                 ),
               );
               _hasCenteredOnce = true;
@@ -209,8 +372,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (e) {
       print('❌ Error getting location: $e');
-      print('📍 Using default location: ${_defaultLocation.latitude}, ${_defaultLocation.longitude}');
-      
+      print(
+          '📍 Using default location: ${_defaultLocation.latitude}, ${_defaultLocation.longitude}');
+
       // Fallback to Hofstra location
       _currentLocation = LocationData.fromMap({
         'latitude': _defaultLocation.latitude,
@@ -218,7 +382,9 @@ class _HomeScreenState extends State<HomeScreen> {
         'accuracy': 100.0,
         'timestamp': DateTime.now().millisecondsSinceEpoch.toDouble(),
       });
-      
+
+      await _updateDriverMarker(_currentLocation!);
+
       setState(() {
         _isLocationLoading = false;
         _locationPermissionGranted = false;
@@ -231,13 +397,18 @@ class _HomeScreenState extends State<HomeScreen> {
       print('📍 Manual location request...');
       final loc = await _location.getLocation();
       _currentLocation = loc;
-      if (_mapController != null && loc.latitude != null && loc.longitude != null) {
+      if (_mapController != null &&
+          loc.latitude != null &&
+          loc.longitude != null) {
         _mapController!.animateCamera(
           CameraUpdate.newLatLng(
             LatLng(loc.latitude!, loc.longitude!),
           ),
         );
       }
+      // Update marker
+      await _updateDriverMarker(loc);
+
       setState(() {
         _hasCenteredOnce = true;
       });
@@ -250,7 +421,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final isLoggedIn = user != null;
-    
+
     return Scaffold(
       body: Stack(
         children: [
@@ -259,24 +430,36 @@ class _HomeScreenState extends State<HomeScreen> {
             onMapCreated: (GoogleMapController controller) {
               _mapController = controller;
               // Move to current location if available
-              if (_currentLocation != null) {
+              if (_currentLocation != null &&
+                  _currentLocation!.latitude != null &&
+                  _currentLocation!.longitude != null) {
                 controller.animateCamera(
                   CameraUpdate.newLatLng(
-                    LatLng(_currentLocation!.latitude!, _currentLocation!.longitude!),
+                    LatLng(
+                      _currentLocation!.latitude!,
+                      _currentLocation!.longitude!,
+                    ),
                   ),
                 );
               }
             },
             initialCameraPosition: CameraPosition(
-              target: _currentLocation != null 
-                  ? LatLng(_currentLocation!.latitude!, _currentLocation!.longitude!)
+              target: _currentLocation != null &&
+                  _currentLocation!.latitude != null &&
+                  _currentLocation!.longitude != null
+                  ? LatLng(
+                _currentLocation!.latitude!,
+                _currentLocation!.longitude!,
+              )
                   : _defaultLocation,
               zoom: 15,
             ),
             markers: _markers,
+            circles: _circles, // Add our pulsing circles here
             mapType: MapType.normal,
-            myLocationEnabled: !_useFixedHofstra && _locationPermissionGranted,
-            myLocationButtonEnabled: !_useFixedHofstra && _locationPermissionGranted,
+            // We are using our own marker, so disable default myLocation blue dot
+            myLocationEnabled: false,
+            myLocationButtonEnabled: false,
             zoomControlsEnabled: true,
             compassEnabled: true,
             mapToolbarEnabled: false,
@@ -288,7 +471,7 @@ class _HomeScreenState extends State<HomeScreen> {
             scrollGesturesEnabled: true,
             zoomGesturesEnabled: true,
           ),
-          
+
           // Top App Bar
           Positioned(
             top: 0,
@@ -348,14 +531,15 @@ class _HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
-                      
+
                       // User Actions
                       if (isLoggedIn) ...[
                         // Location Status
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _locationPermissionGranted 
+                            color: _locationPermissionGranted
                                 ? Colors.green.withOpacity(0.8)
                                 : Colors.orange.withOpacity(0.8),
                             borderRadius: BorderRadius.circular(12),
@@ -364,13 +548,17 @@ class _HomeScreenState extends State<HomeScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                _locationPermissionGranted ? Icons.location_on : Icons.location_off,
+                                _locationPermissionGranted
+                                    ? Icons.location_on
+                                    : Icons.location_off,
                                 color: Colors.white,
                                 size: 16,
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                _locationPermissionGranted ? 'Live' : 'Offline',
+                                _locationPermissionGranted
+                                    ? 'Live'
+                                    : 'Offline',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 12,
@@ -386,13 +574,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           radius: 20,
                           backgroundColor: kPrimaryColor,
                           child: IconButton(
-                            icon: const Icon(Icons.notifications, color: Colors.white, size: 20),
+                            icon: const Icon(Icons.notifications,
+                                color: Colors.white, size: 20),
                             onPressed: () => context.go('/notifications'),
                             tooltip: 'Notifications',
                           ),
                         ),
                       ] else
-                        // Login Button
+                      // Login Button
                         ElevatedButton.icon(
                           onPressed: () => context.go('/login'),
                           icon: const Icon(Icons.login, size: 18),
@@ -400,7 +589,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: kPrimaryColor,
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
                           ),
                         ),
                     ],
@@ -409,7 +599,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          
+
           // Bottom Control Panel (only for logged-in users)
           if (isLoggedIn)
             Positioned(
@@ -451,7 +641,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ],
                               ),
                               child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                mainAxisAlignment:
+                                MainAxisAlignment.spaceEvenly,
                                 children: [
                                   _buildQuickStat(
                                     'Total Orders',
@@ -484,9 +675,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ],
                               ),
                             ),
-                            
+
                             const SizedBox(height: 16),
-                            
+
                             // Action Buttons
                             Row(
                               children: [
@@ -494,15 +685,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                   child: Stack(
                                     children: [
                                       ElevatedButton.icon(
-                                        onPressed: () => context.go('/assigned-orders'),
+                                        onPressed: () =>
+                                            context.go('/assigned-orders'),
                                         icon: const Icon(Icons.assignment),
-                                        label: const Text('Assigned Orders'),
+                                        label:
+                                        const Text('Assigned Orders'),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: kPrimaryColor,
                                           foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 12),
                                           shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(12),
+                                            borderRadius:
+                                            BorderRadius.circular(12),
                                           ),
                                         ),
                                       ),
@@ -515,7 +710,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                             padding: const EdgeInsets.all(4),
                                             decoration: BoxDecoration(
                                               color: Colors.red,
-                                              borderRadius: BorderRadius.circular(10),
+                                              borderRadius:
+                                              BorderRadius.circular(10),
                                             ),
                                             constraints: const BoxConstraints(
                                               minWidth: 20,
@@ -538,7 +734,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: _totalOrders >= 2 
+                                    onPressed: _totalOrders >= 2
                                         ? () => context.go('/optimize')
                                         : null,
                                     icon: const Icon(Icons.route),
@@ -546,31 +742,40 @@ class _HomeScreenState extends State<HomeScreen> {
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: kAccentColor,
                                       foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 12),
                                       shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
+                                        borderRadius:
+                                        BorderRadius.circular(12),
                                       ),
                                     ),
                                   ),
                                 ),
                               ],
                             ),
-                            
+
                             // Temporary migration button - remove after migration is complete
                             const SizedBox(height: 16),
                             ElevatedButton.icon(
                               onPressed: () async {
                                 try {
-                                  await DeliveryMigration.migrateAcceptedAddressesToDeliveries();
+                                  await DeliveryMigration
+                                      .migrateAcceptedAddressesToDeliveries();
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('✅ Migration completed! Check console for details.')),
+                                      const SnackBar(
+                                        content: Text(
+                                            '✅ Migration completed! Check console for details.'),
+                                      ),
                                     );
                                   }
                                 } catch (e) {
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('❌ Migration failed: $e')),
+                                      SnackBar(
+                                        content: Text(
+                                            '❌ Migration failed: $e'),
+                                      ),
                                     );
                                   }
                                 }
@@ -580,7 +785,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.orange,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                padding:
+                                const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
@@ -594,7 +800,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          
+
           // Current Location Button (hidden in fixed Hofstra mode)
           if (!_useFixedHofstra)
             Positioned(
@@ -620,13 +826,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     _followMe = !_followMe;
                   });
                 },
-                backgroundColor: _followMe ? kPrimaryColor : Colors.white,
-                foregroundColor: _followMe ? Colors.white : kPrimaryColor,
+                backgroundColor:
+                _followMe ? kPrimaryColor : Colors.white,
+                foregroundColor:
+                _followMe ? Colors.white : kPrimaryColor,
                 tooltip: _followMe ? 'Following you' : 'Tap to follow',
                 child: Icon(_followMe ? Icons.play_arrow : Icons.pause),
               ),
             ),
-          
+
           // Loading Overlay
           if (_isLocationLoading)
             Container(
@@ -636,7 +844,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(kPrimaryColor),
+                      valueColor:
+                      AlwaysStoppedAnimation<Color>(kPrimaryColor),
                     ),
                     SizedBox(height: 16),
                     Text(
@@ -657,7 +866,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildQuickStat(String label, String value, IconData icon, Color color) {
+  Widget _buildQuickStat(
+      String label, String value, IconData icon, Color color) {
     return Column(
       children: [
         Icon(icon, color: color, size: 20),

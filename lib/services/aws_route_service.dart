@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -6,7 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import '../models/delivery_address.dart';
 import '../models/route_optimization.dart';
-import 'turn_by_turn_service.dart'; // Import our new service
+import 'turn_by_turn_service.dart';
 
 class AWSRouteService {
   String? _apiKey;
@@ -23,7 +22,8 @@ class AWSRouteService {
 
     if (_apiKey == null || _region == null || _calculatorName == null) {
       _isInitialized = false;
-      throw Exception('AWS credentials not found in .env file. Please check your configuration.');
+      throw Exception(
+          'AWS credentials not found in .env file. Please check your configuration.');
     }
     _isInitialized = true;
   }
@@ -39,26 +39,36 @@ class AWSRouteService {
     }
 
     if (addresses.length < 2) {
-      throw Exception('At least two addresses (departure and destination) are required.');
+      throw Exception(
+          'At least two addresses (departure and destination) are required.');
     }
 
     final departure = addresses.first;
     final destination = addresses.last;
-    final waypoints = addresses.length > 2 ? addresses.sublist(1, addresses.length - 1) : <DeliveryAddress>[];
+    final waypoints = addresses.length > 2
+        ? addresses.sublist(1, addresses.length - 1)
+        : <DeliveryAddress>[];
 
-    final endpoint = 'https://routes.geo.$_region.amazonaws.com/routes/v0/calculators/$_calculatorName/calculate/route?key=$_apiKey';
+    final endpoint =
+        'https://routes.geo.$_region.amazonaws.com/routes/v0/calculators/$_calculatorName/calculate/route?key=$_apiKey';
 
     final payload = {
       'DeparturePosition': [departure.longitude, departure.latitude],
       'DestinationPosition': [destination.longitude, destination.latitude],
       if (waypoints.isNotEmpty)
-        'WaypointPositions': waypoints.map((w) => [w.longitude, w.latitude]).toList(),
+        'WaypointPositions':
+        waypoints.map((w) => [w.longitude, w.latitude]).toList(),
       'TravelMode': travelMode,
       if (travelMode == 'Truck')
         'TruckModeOptions': {
           'AvoidFerries': true,
           'AvoidTolls': false,
-          'Dimensions': {'Height': 4.2, 'Length': 22.0, 'Width': 2.6, 'Unit': 'Meters'},
+          'Dimensions': {
+            'Height': 4.2,
+            'Length': 22.0,
+            'Width': 2.6,
+            'Unit': 'Meters'
+          },
           'Weight': {'Total': 36000, 'Unit': 'Kilograms'}
         },
       'IncludeLegGeometry': true,
@@ -66,31 +76,46 @@ class AWSRouteService {
       'DistanceUnit': 'Kilometers',
     };
 
+    print('🌎 AWS RouteService → Sending request to: $endpoint');
+    print('📤 Payload: $payload');
+
     try {
-      final response = await http.post(
+      final response = await http
+          .post(
         Uri.parse(endpoint),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode(payload),
-      );
-      
-      if (response.statusCode == 200) {
-        final responseBody = jsonDecode(response.body);
-        // --- FIX: Await the async parse function ---
-        return await _parseRouteResponse(responseBody, addresses);
-      } else {
-        print('AWS API Error Response Body: ${response.body}');
-        throw Exception('AWS API error (${response.statusCode}): ${response.body}');
+      )
+          .timeout(const Duration(seconds: 20));
+
+      print('📥 AWS Response Status: ${response.statusCode}');
+
+      if (response.statusCode != 200) {
+        print('❌ AWS Error body: ${response.body}');
+        throw Exception(
+            'AWS API error (${response.statusCode}): ${response.body}');
       }
+
+      final responseBody = jsonDecode(response.body);
+
+      if (!responseBody.containsKey('Summary') ||
+          !responseBody.containsKey('Legs')) {
+        throw Exception(
+            'AWS response is missing required fields. Full body: ${response.body}');
+      }
+
+      return await _parseRouteResponse(responseBody, addresses);
     } catch (e) {
-      print('Exception during HTTP request: $e');
+      print('❌ Exception during AWS route request: $e');
       throw Exception('Error calculating route: $e');
     }
   }
 
-  // --- FIX: Mark this function as async ---
-  Future<RouteOptimization> _parseRouteResponse(Map<String, dynamic> responseBody, List<DeliveryAddress> originalAddresses) async {
+  Future<RouteOptimization> _parseRouteResponse(
+      Map<String, dynamic> responseBody,
+      List<DeliveryAddress> originalAddresses) async {
+    print('🔍 Parsing AWS route response...');
+
     final summary = responseBody['Summary'];
     final awsLegs = responseBody['Legs'] as List;
 
@@ -107,32 +132,45 @@ class AWSRouteService {
     for (int i = 0; i < awsLegs.length; i++) {
       final leg = awsLegs[i];
       final legGeometry = leg['Geometry']['LineString'] as List;
-      fullGeometry.addAll(legGeometry.map((p) => (p as List).map<double>((c) => c.toDouble()).toList()));
 
-      majorLegs.add(RouteStep(
-        sequenceNumber: legSequence++,
-        address: originalAddresses[i + 1],
-        instructions: 'Stop ${i + 1}',
-        distanceFromPrevious: leg['Distance'].toDouble(),
-        estimatedTravelTime: Duration(seconds: (leg['DurationSeconds'] as num).round()),
-      ));
+      fullGeometry.addAll(legGeometry
+          .map((p) => (p as List).map<double>((c) => c.toDouble()).toList()));
+
+      majorLegs.add(
+        RouteStep(
+          sequenceNumber: legSequence++,
+          address: originalAddresses[i + 1],
+          instructions: 'Stop ${i + 1}',
+          distanceFromPrevious: (leg['Distance'] as num).toDouble(),
+          estimatedTravelTime:
+          Duration(seconds: (leg['DurationSeconds'] as num).round()),
+        ),
+      );
     }
 
-    // --- FIX: Await the async generateSteps function ---
-    final routePoints = fullGeometry.map((p) => LatLng(p[1], p[0])).toList();
-    final List<RouteStep> detailedSteps = await TurnByTurnService.generateSteps(routePoints);
+    print('🧭 Generating turn-by-turn steps...');
 
-    final flippedGeometry = fullGeometry.map((p) => [p[1], p[0]]).toList();
+    final routePoints =
+    fullGeometry.map((p) => LatLng(p[1], p[0])).toList();
+
+    final detailedSteps =
+    await TurnByTurnService.generateSteps(routePoints);
+
+    final flippedGeometry =
+    fullGeometry.map((p) => [p[1], p[0]]).toList();
+
+    print('✅ Route parsed successfully!');
 
     return RouteOptimization(
       name: 'AWS Optimized Route',
       addresses: originalAddresses,
       algorithm: RouteAlgorithm.aws,
-      totalDistance: summary['Distance'].toDouble(),
-      estimatedTime: Duration(seconds: (summary['DurationSeconds'] as num).round()),
+      totalDistance: (summary['Distance'] as num).toDouble(),
+      estimatedTime:
+      Duration(seconds: (summary['DurationSeconds'] as num).round()),
       routeGeometry: flippedGeometry,
-      detailedSteps: detailedSteps, // Use our generated steps
-      legs: majorLegs,       
+      detailedSteps: detailedSteps,
+      legs: majorLegs,
       completedAt: DateTime.now(),
     );
   }
