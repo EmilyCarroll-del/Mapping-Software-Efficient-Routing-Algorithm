@@ -320,13 +320,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     await _notificationService.markAsRead(notification.id);
     if (!mounted) return;
 
+    // Try to pull out an orderId in a flexible way (from actionData or metadata)
+    final String? orderId =
+        (actionData['orderId'] as String?) ??
+            (metadata['orderId'] as String?);
+
     switch (actionType) {
       case 'view_order':
-        final orderId = actionData['orderId'] as String?;
+      // Normal order notification path
         if (orderId != null) {
-          await _markRelatedAsRead(conversationId: null, otherUserId: null, orderId: orderId);
-          context.go('/assigned-orders');
+          await _markRelatedAsRead(
+            conversationId: null,
+            otherUserId: null,
+            orderId: orderId,
+          );
         }
+        // Even if orderId is somehow null, still navigate to Assigned Orders
+        context.go('/assigned-orders');
         break;
 
       case 'open_chat':
@@ -347,6 +357,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         break;
 
       default:
+      //
+      // 🛟 Fallback: if this is an ORDER notification but the actionType
+      // is missing/unknown, still send user to Assigned Orders.
+      //
+        if (type == 'order') {
+          if (orderId != null) {
+            await _markRelatedAsRead(
+              conversationId: null,
+              otherUserId: null,
+              orderId: orderId,
+            );
+          }
+          context.go('/assigned-orders');
+          return;
+        }
+
+        // Otherwise, treat it as a legacy message-style notification
         await _tryOpenLegacyMessage(notification);
         break;
     }
@@ -639,7 +666,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       if (difference.inHours == 0) {
         if (difference.inMinutes == 0) return 'Just now';
         return '${difference.inMinutes}m ago';
-      }      return '${difference.inHours}h ago';
+      }
+      return '${difference.inHours}h ago';
     } else if (difference.inDays == 1) {
       return 'Yesterday';
     } else if (difference.inDays < 7) {

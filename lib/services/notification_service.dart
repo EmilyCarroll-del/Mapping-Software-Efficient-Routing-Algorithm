@@ -325,6 +325,7 @@ class NotificationService {
     }
   }
 
+  /// Unread count for *all* notification types
   Stream<int> getUnreadCount() {
     final user = _auth.currentUser;
     if (user == null) {
@@ -334,6 +335,21 @@ class NotificationService {
         .collection('notifications')
         .where('userId', isEqualTo: user.uid)
         .where('isRead', isEqualTo: false)
+        .snapshots()
+        .map((s) => s.docs.length);
+  }
+
+  /// 🔹 Unread count for *message* notifications only (used for Inbox badge)
+  Stream<int> getUnreadMessageCount() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return Stream<int>.value(0);
+    }
+    return _db
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('isRead', isEqualTo: false)
+        .where('type', isEqualTo: 'message')
         .snapshots()
         .map((s) => s.docs.length);
   }
