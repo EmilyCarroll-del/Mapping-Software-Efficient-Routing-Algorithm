@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:go_router/go_router.dart';
 
 import '../providers/auth_provider.dart';
 import 'inbox.dart'; // Import the InboxPage
@@ -66,19 +67,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         automaticallyImplyLeading: false,
         leading: IconButton(
           icon: const Icon(Icons.settings, color: Colors.white),
-          onPressed: () => Navigator.of(context).pushNamed('/settings'),
+          onPressed: () => context.push('/settings'),
         ),
         title: const Text('GraphGo Admin', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.inbox, color: Colors.white),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const InboxPage()),
-              );
-            },
+            onPressed: () => context.push('/inbox'),
             tooltip: 'Inbox',
           ),
           Padding(
@@ -99,7 +95,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   final companyCode = userData?['companyCode'] as String?;
                   
                   return InkWell(
-                    onTap: () => Navigator.of(context).pushNamed('/profile'),
+                    onTap: () => context.push('/profile'),
                     child: MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: Container(
@@ -145,7 +141,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
           IconButton(
             onPressed: () {
-              Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
               authProvider.signOut();
             },
             icon: const Icon(Icons.logout, color: Colors.white, size: 18),
@@ -319,7 +314,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       runSpacing: 8.0,
                       children: [
                         ElevatedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/view-orders'),
+                          onPressed: () => context.push('/view-orders'),
                           icon: const Icon(Icons.view_list),
                           label: const Text('View Orders'),
                           style: ElevatedButton.styleFrom(
@@ -329,7 +324,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ),
                         ),
                         ElevatedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/assigned-addresses'),
+                          onPressed: () => context.push('/assigned-addresses'),
                           icon: const Icon(Icons.assignment_turned_in),
                           label: const Text('View Assigned Addresses'),
                           style: ElevatedButton.styleFrom(
@@ -339,7 +334,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ),
                         ),
                         ElevatedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/admin-route-history'),
+                          onPressed: () => context.push('/admin-route-history'),
                           icon: const Icon(Icons.history),
                           label: const Text('Route History'),
                           style: ElevatedButton.styleFrom(
@@ -364,7 +359,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ),
                         ),
                         OutlinedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/add-order'),
+                          onPressed: () => context.push('/add-order'),
                           icon: const Icon(Icons.add),
                           label: const Text('Add Order'),
                           style: OutlinedButton.styleFrom(

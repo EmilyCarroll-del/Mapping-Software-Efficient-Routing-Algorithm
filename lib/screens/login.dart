@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 
 import '../providers/settings_provider.dart';
 import '../services/google_auth_service.dart';
@@ -28,11 +29,12 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     switch (role) {
       case 'Admin':
-        Navigator.of(context).pushReplacementNamed('/admin-dashboard');
+        // CORRECT NAVIGATION METHOD
+        context.go('/admin-dashboard');
         break;
       case 'Driver':
       default:
-        Navigator.of(context).pushReplacementNamed('/map');
+        context.go('/map');
         break;
     }
   }
@@ -156,7 +158,7 @@ class _LoginPageState extends State<LoginPage> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.settings, color: Colors.white),
-          onPressed: () => Navigator.of(context).pushNamed('/settings'),
+          onPressed: () => context.push('/settings'), // Correct navigation
         ),
         title: const Text('GraphGo', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
         centerTitle: true,
@@ -260,7 +262,7 @@ class _LoginPageState extends State<LoginPage> {
                           alignment: Alignment.centerRight,
                           child: TextButton(
                             onPressed: () {
-                              Navigator.of(context).pushNamed('/forgot');
+                              context.push('/forgot'); // Correct navigation
                             },
                             child: const Text('Forgot Password?'),
                           ),
@@ -273,6 +275,8 @@ class _LoginPageState extends State<LoginPage> {
                                 child: ElevatedButton(
                                   onPressed: _login,
                                   style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0D2B0D),
+                                    foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(vertical: 20),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
@@ -285,7 +289,7 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 20),
                   TextButton(
                     onPressed: () {
-                      Navigator.of(context).pushNamed('/signup');
+                      context.push('/signup'); // Correct navigation
                     },
                     child: const Text("Don't have an account? Sign Up"),
                   ),

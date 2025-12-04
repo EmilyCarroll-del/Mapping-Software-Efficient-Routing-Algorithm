@@ -1,43 +1,46 @@
+
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'firebase_options.dart';
+import 'package:graph_go/providers/auth_provider.dart';
+import 'package:graph_go/providers/delivery_provider.dart';
+import 'package:graph_go/providers/settings_provider.dart';
+import 'package:graph_go/providers/graph_provider.dart';
+import 'package:graph_go/services/firestore_service.dart';
+import 'package:graph_go/screens/login.dart';
+import 'package:graph_go/screens/map_screen.dart';
+import 'package:graph_go/screens/admin_dashboard_screen.dart';
+import 'package:graph_go/screens/driver_assignments_screen.dart';
+import 'package:graph_go/screens/settings_screen.dart';
+import 'package:graph_go/screens/inbox.dart';
+import 'package:graph_go/screens/profile_screen.dart';
+import 'package:graph_go/screens/assigned_addresses_screen.dart';
+import 'package:graph_go/screens/view_orders_screen.dart';
+import 'package:graph_go/screens/add_order_screen.dart';
+import 'package:graph_go/screens/admin_route_history_screen.dart';
 
-// Providers
-import 'providers/graph_provider.dart';
-import 'providers/settings_provider.dart';
-import 'providers/delivery_provider.dart';
-import 'providers/auth_provider.dart';
-import 'services/firestore_service.dart';
-import 'services/profile_service.dart'; // Import the ProfileService
+class AuthStateNotifier extends ChangeNotifier {
+  AuthStateNotifier() {
+    FirebaseAuth.instance.authStateChanges().listen((_) => notifyListeners());
+  }
+}
 
-// Screens
-import 'screens/add_order_screen.dart';
-import 'screens/home_screen.dart';
-import 'screens/map_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/profile_screen.dart';
-import 'screens/login.dart';
-import 'screens/signup.dart';
-import 'screens/forgot_password.dart';
-import 'screens/admin_dashboard_screen.dart';
-import 'screens/assigned_addresses_screen.dart';
-import 'screens/driver_assignments_screen.dart';
-import 'screens/view_orders_screen.dart';
-import 'screens/my_drivers_screen.dart';
-import 'screens/admin_route_history_screen.dart';
-import 'screens/active_codes_screen.dart';
+late final AuthStateNotifier authStateNotifier;
 
-const String googleApiKey = "AIzaSyCFx_8PW_R6rGq-julkwV4JJGixbzmnP74";
-
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
+  
+  authStateNotifier = AuthStateNotifier();
   final settingsProvider = await SettingsProvider.create();
 
   runApp(MyApp(settingsProvider: settingsProvider));
@@ -50,67 +53,80 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const darkGreenColor = Color(0xFF0D2B0D);
+
     return MultiProvider(
       providers: [
-        Provider<FirestoreService>(create: (_) => FirestoreService()),
-        Provider<ProfileService>(create: (_) => ProfileService()), // Add ProfileService here
-        ChangeNotifierProvider(create: (_) => GraphProvider()),
-        ChangeNotifierProvider(create: (_) => DeliveryProvider()),
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider.value(value: settingsProvider),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => GraphProvider()),
+        Provider(create: (_) => FirestoreService()),
+        ChangeNotifierProxyProvider<AuthProvider, DeliveryProvider>(
+          create: (_) => DeliveryProvider(''),
+          update: (_, auth, __) => DeliveryProvider((auth as AuthProvider).user?.uid ?? ''),
+        ),
       ],
       child: Consumer<SettingsProvider>(
         builder: (context, settings, child) {
-          return MaterialApp(
-            debugShowCheckedModeBanner: false,
-            title: "GraphGo",
-            themeMode: settings.darkMode ? ThemeMode.dark : ThemeMode.light,
+          return MaterialApp.router(
+            title: 'Graph & Go',
             theme: ThemeData(
               brightness: Brightness.light,
-              colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.light),
+              primarySwatch: Colors.green,
               appBarTheme: const AppBarTheme(
-                backgroundColor: Color(0xFF0D2B0D),
+                backgroundColor: darkGreenColor,
                 foregroundColor: Colors.white,
               ),
-              useMaterial3: true,
             ),
             darkTheme: ThemeData(
               brightness: Brightness.dark,
-              colorScheme: ColorScheme.dark(
-                primary: Colors.deepPurple.shade300,
-                surface: Colors.grey.shade800,
-              ),
-              scaffoldBackgroundColor: Colors.black,
+              primarySwatch: Colors.green,
               appBarTheme: const AppBarTheme(
-                backgroundColor: Color(0xFF0D2B0D),
+                backgroundColor: darkGreenColor,
                 foregroundColor: Colors.white,
               ),
-              cardTheme: CardThemeData(
-                color: Colors.grey[850],
-                elevation: 2,
-              ),
-              useMaterial3: true,
+              scaffoldBackgroundColor: const Color(0xFF121212),
             ),
-            home: kIsWeb ? const LoginPage() : const HomeScreen(),
-            routes: {
-              "/login": (context) => const LoginPage(),
-              "/signup": (context) => const SignupPage(),
-              "/forgot": (context) => const ForgotPasswordPage(),
-              "/map": (context) => const MapScreen(),
-              "/settings": (context) => const SettingsScreen(),
-              "/profile": (context) => const ProfileScreen(),
-              "/admin-dashboard": (context) => const AdminDashboardScreen(),
-              "/add-order": (context) => const AddOrderScreen(),
-              "/assigned-addresses": (context) => AssignedAddressesScreen(),
-              "/driver-assignments": (context) => const DriverAssignmentsScreen(),
-              "/view-orders": (context) => const ViewOrdersScreen(),
-              "/my-drivers": (context) => const MyDriversScreen(),
-              "/admin-route-history": (context) => const AdminRouteHistoryScreen(),
-              "/active-codes": (context) => const ActiveCodesScreen(),
-            },
+            themeMode: settings.darkMode ? ThemeMode.dark : ThemeMode.light,
+            routerConfig: _router,
+            debugShowCheckedModeBanner: false,
           );
         },
       ),
     );
   }
 }
+
+// --- DEFINITIVE ROUTER FIX ---
+late final GoRouter _router = GoRouter(
+  refreshListenable: authStateNotifier, 
+  redirect: (BuildContext context, GoRouterState state) {
+    final isLoggedIn = FirebaseAuth.instance.currentUser != null;
+    final isLoggingIn = state.matchedLocation == '/login';
+
+    // The only rule: if the user is not logged in and not on the login page,
+    // redirect them to the login page.
+    if (!isLoggedIn && !isLoggingIn) {
+      return '/login';
+    }
+
+    // In all other cases, do not redirect. This allows the LoginPage to have
+    // full control over navigation after a successful login.
+    return null;
+  },
+  routes: <RouteBase>[
+    // A default route is still needed for when the app first loads in a logged-in state.
+    GoRoute(path: '/', builder: (_, __) => const AdminDashboardScreen()), 
+    GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
+    GoRoute(path: '/map', builder: (_, __) => const MapScreen()),
+    GoRoute(path: '/admin-dashboard', builder: (_, __) => const AdminDashboardScreen()),
+    GoRoute(path: '/driver-assignments', builder: (_, __) => const DriverAssignmentsScreen()),
+    GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
+    GoRoute(path: '/inbox', builder: (_, __) => const InboxPage()),
+    GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
+    GoRoute(path: '/assigned-addresses', builder: (_, __) => const AssignedAddressesScreen()),
+    GoRoute(path: '/view-orders', builder: (_, __) => const ViewOrdersScreen()),
+    GoRoute(path: '/add-order', builder: (_, __) => const AddOrderScreen()),
+    GoRoute(path: '/admin-route-history', builder: (_, __) => const AdminRouteHistoryScreen()),
+  ],
+);
