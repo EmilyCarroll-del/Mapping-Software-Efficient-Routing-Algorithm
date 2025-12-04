@@ -28,7 +28,7 @@ class RouteHistoryScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: kPrimaryColor,
+        backgroundColor: const Color(0xFF0D2B0D),
         foregroundColor: Colors.white,
         title: const Text('Route History'),
       ),

@@ -1,0 +1,52 @@
+type User @table {
+  email: String!
+  passwordHash: String!
+  userType: String!
+  createdAt: Timestamp!
+  companyName: String
+  firstName: String
+  lastName: String
+  phoneNumber: String
+  profilePictureUrl: String
+}
+
+type Truck @table {
+  driver: User
+  truckType: String!
+  capacity: Int!
+  licensePlate: String
+  make: String
+  model: String
+  year: Int
+}
+
+type LoadRequest @table {
+  company: User
+  title: String!
+  pickupLocation: String!
+  deliveryLocation: String!
+  cargoDescription: String!
+  requiredTruckType: String!
+  paymentAmount: Float!
+  status: String!
+  createdAt: Timestamp!
+  specialInstructions: String
+  weight: Float
+}
+
+type JobOffer @table {
+  loadRequest: LoadRequest
+  company: User
+  driver: User
+  offerStatus: String!
+  createdAt: Timestamp!
+  messageFromCompany: String
+}
+
+type Availability @table {
+  driver: User
+  status: String!
+  lastUpdated: Timestamp!
+  availableFrom: Timestamp
+  availableTo: Timestamp
+}
