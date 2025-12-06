@@ -7,6 +7,7 @@ enum RouteAlgorithm {
   kruskal,
   fordBellman,
   nearestNeighbor,
+  aws,
 }
 
 class RouteOptimization {
@@ -19,6 +20,9 @@ class RouteOptimization {
   final List<RouteStep>? optimizedRoute;
   final double? totalDistance;
   final Duration? estimatedTime;
+  final List<List<double>>? routeGeometry;
+  final List<RouteStep>? detailedSteps;
+  final List<RouteStep>? legs;
 
   RouteOptimization({
     String? id,
@@ -30,6 +34,9 @@ class RouteOptimization {
     this.optimizedRoute,
     this.totalDistance,
     this.estimatedTime,
+    this.routeGeometry,
+    this.detailedSteps,
+    this.legs,
   }) : id = id ?? const Uuid().v4(),
        createdAt = createdAt ?? DateTime.now();
 
@@ -45,6 +52,9 @@ class RouteOptimization {
     'optimizedRoute': optimizedRoute?.map((s) => s.toJson()).toList(),
     'totalDistance': totalDistance,
     'estimatedTime': estimatedTime?.inMinutes,
+    'routeGeometry': routeGeometry,
+    'detailedSteps': detailedSteps?.map((s) => s.toJson()).toList(),
+    'legs': legs?.map((s) => s.toJson()).toList(),
   };
 
   factory RouteOptimization.fromJson(Map<String, dynamic> json) => RouteOptimization(
@@ -68,6 +78,21 @@ class RouteOptimization {
     totalDistance: json['totalDistance']?.toDouble(),
     estimatedTime: json['estimatedTime'] != null
         ? Duration(minutes: json['estimatedTime'])
+        : null,
+    routeGeometry: json['routeGeometry'] != null
+        ? (json['routeGeometry'] as List)
+            .map((p) => (p as List).map<double>((c) => c.toDouble()).toList())
+            .toList()
+        : null,
+    detailedSteps: json['detailedSteps'] != null
+        ? (json['detailedSteps'] as List)
+            .map((s) => RouteStep.fromJson(s))
+            .toList()
+        : null,
+    legs: json['legs'] != null
+        ? (json['legs'] as List)
+            .map((s) => RouteStep.fromJson(s))
+            .toList()
         : null,
   );
 }

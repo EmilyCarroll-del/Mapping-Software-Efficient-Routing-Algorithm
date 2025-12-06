@@ -10,6 +10,7 @@ import 'providers/graph_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/delivery_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/location_provider.dart';
 import 'services/firestore_service.dart';
 import 'services/profile_service.dart'; // Import the ProfileService
 
@@ -57,6 +58,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => GraphProvider()),
         ChangeNotifierProvider(create: (_) => DeliveryProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (context) => LocationProvider()..initialize()),
         ChangeNotifierProvider.value(value: settingsProvider),
       ],
       child: Consumer<SettingsProvider>(

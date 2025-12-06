@@ -162,6 +162,10 @@ class DeliveryProvider extends ChangeNotifier {
         case RouteAlgorithm.nearestNeighbor:
           optimizedRoute = RoutingAlgorithms.nearestNeighborAlgorithm(_addresses, start);
           break;
+        case RouteAlgorithm.aws:
+          // AWS routing is handled separately, so we don't need to do anything here.
+          optimizedRoute = _addresses;
+          break;
       }
       
       // Calculate total distance and estimated time

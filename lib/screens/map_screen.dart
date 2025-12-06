@@ -3,15 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:location/location.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:geocoding/geocoding.dart' as geocoding;
+import 'package:provider/provider.dart';
 
 import 'inbox.dart'; // Import the InboxPage
 import '../services/notification_service.dart';
-import '../services/firestore_service.dart';
-import '../services/geocoding_service.dart';
+import '../services/aws_route_service.dart';
+import '../models/delivery_address.dart';
+import '../providers/delivery_provider.dart';
+import '../providers/location_provider.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  final DeliveryAddress? deliveryAddress;
+
+  const MapScreen({super.key, this.deliveryAddress});
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -19,10 +23,9 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final Completer<GoogleMapController> _controller = Completer();
-  final FirestoreService _firestoreService = FirestoreService();
-  LocationData? _currentLocation;
-  StreamSubscription<LocationData>? _locationSubscription;
+  final AWSRouteService _awsRouteService = AWSRouteService();
   Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
 
   final User? user = FirebaseAuth.instance.currentUser;
 
@@ -34,99 +37,66 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    // Initialize notification service for the driver when the MapScreen loads.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final driverId = user?.uid ?? 'driver_ashmini_01';
       NotificationService.instance.initForDriver(driverId);
+      Provider.of<DeliveryProvider>(context, listen: false).initialize();
+
+      if (widget.deliveryAddress != null && widget.deliveryAddress!.hasCoordinates) {
+        final locationProvider = Provider.of<LocationProvider>(context, listen: false);
+        if (locationProvider.isLocationAvailable) {
+          _calculateAndDisplayRoute([widget.deliveryAddress!], locationProvider.currentLocation!);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location not available, cannot calculate route.')),
+          );
+        }
+      }
     });
-    _initializeLocationAndMarkers();
+    _awsRouteService.initialize();
   }
 
-  Future<void> _initializeLocationAndMarkers() async {
-    await _initializeLocation();
-    if (user != null) {
-      _loadAddressMarkers(user!.uid);
-    }
-  }
+  Future<void> _calculateAndDisplayRoute(
+      List<DeliveryAddress> addresses, LocationData currentLocation) async {
+    final startAddress = DeliveryAddress.fromCoordinates(
+      latitude: currentLocation.latitude!,
+      longitude: currentLocation.longitude!,
+    );
 
-  Future<void> _initializeLocation() async {
-    Location location = Location();
-    bool serviceEnabled = await location.serviceEnabled();
-    if (!serviceEnabled) {
-      serviceEnabled = await location.requestService();
-      if (!serviceEnabled) return;
-    }
+    final allAddresses = [startAddress, ...addresses];
 
-    PermissionStatus permissionGranted = await location.hasPermission();
-    if (permissionGranted == PermissionStatus.denied) {
-      permissionGranted = await location.requestPermission();
-      if (permissionGranted != PermissionStatus.granted) return;
-    }
+    try {
+      final routeOptimization = await _awsRouteService.calculateRoute(
+        addresses: allAddresses,
+        travelMode: 'Car',
+      );
 
-    _currentLocation = await location.getLocation();
-    if (_currentLocation != null) {
-      _moveCameraToLocation(_currentLocation!);
-    }
+      if (routeOptimization.routeGeometry != null) {
+        final points = routeOptimization.routeGeometry!
+            .map<LatLng>((p) => LatLng(p[0], p[1]))
+            .toList();
 
-    _locationSubscription = location.onLocationChanged.listen((LocationData newLocation) {
+        final polyline = Polyline(
+          polylineId: const PolylineId('aws_route'),
+          points: points,
+          color: Colors.blue,
+          width: 5,
+        );
+
+        if (mounted) {
+          setState(() {
+            _polylines = {polyline};
+          });
+        }
+      }
+    } catch (e) {
+      print('Error calculating AWS route: $e');
       if (mounted) {
-        setState(() => _currentLocation = newLocation);
-        _moveCameraToLocation(newLocation);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error calculating route: $e')),
+        );
       }
-    });
-  }
-
-  Future<void> _loadAddressMarkers(String userId) async {
-    _firestoreService.getDriverDeliveries(userId).listen((addresses) async {
-      Set<Marker> newMarkers = {};
-      for (var address in addresses) {
-        // Build a safe query from the address parts. Some fields may be null/empty
-        // or contain the string 'null' (from bad data). Filter those out.
-        final parts = <String>[];
-        void addIfValid(String? s) {
-          if (s == null) return;
-          final t = s.trim();
-          if (t.isEmpty) return;
-          if (t.toLowerCase() == 'null') return;
-          parts.add(t);
-        }
-
-        addIfValid(address.streetAddress);
-        addIfValid(address.city);
-        addIfValid(address.state);
-        addIfValid(address.zipCode);
-
-        if (parts.isEmpty) {
-          // nothing to geocode for this entry — log the raw fields so we can fix bad data
-          print('Skipping geocode id=${address.id} — no valid address parts. '
-              'street="${address.streetAddress}", city="${address.city}", '
-              'state="${address.state}", zip="${address.zipCode}"');
-          continue;
-        }
-
-        // Attempt to geocode via our GeocodingService which has fallbacks + safe query building.
-        try {
-          final geocoded = await GeocodingService.geocodeAddress(address);
-          if (geocoded.hasCoordinates) {
-            newMarkers.add(
-              Marker(
-                markerId: MarkerId(address.id),
-                position: LatLng(geocoded.latitude!, geocoded.longitude!),
-                infoWindow: InfoWindow(title: address.streetAddress, snippet: address.notes),
-              ),
-            );
-          } else {
-            print('GeocodingService returned no coordinates for id=${address.id} (query may have failed)');
-          }
-        } catch (e, st) {
-          print('GeocodingService error for id=${address.id}: $e\n$st');
-        }
-        // small delay could be added here if a large batch causes rate-limit issues
-      }
-      if (mounted) {
-        setState(() => _markers = newMarkers);
-      }
-    });
+    }
   }
 
   Future<void> _moveCameraToLocation(LocationData locationData) async {
@@ -144,12 +114,6 @@ class _MapScreenState extends State<MapScreen> {
     if (mounted) {
       Navigator.of(context).pushNamedAndRemoveUntil('/', (Route<dynamic> route) => false);
     }
-  }
-
-  @override
-  void dispose() {
-    _locationSubscription?.cancel();
-    super.dispose();
   }
 
   @override
@@ -187,19 +151,45 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ],
       ),
-      body: _currentLocation == null
-          ? const Center(child: CircularProgressIndicator())
-          : GoogleMap(
-              mapType: MapType.normal,
-              initialCameraPosition: _kGooglePlex,
-              onMapCreated: (GoogleMapController controller) {
-                _controller.complete(controller);
-              },
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
+      body: Consumer2<DeliveryProvider, LocationProvider>(
+        builder: (context, deliveryProvider, locationProvider, child) {
+          if (deliveryProvider.isLoading || !locationProvider.isLocationAvailable) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-              markers: _markers,
-            ),
+          if (widget.deliveryAddress != null && widget.deliveryAddress!.hasCoordinates) {
+            _markers = {
+              Marker(
+                markerId: MarkerId(widget.deliveryAddress!.id),
+                position: LatLng(widget.deliveryAddress!.latitude!, widget.deliveryAddress!.longitude!),
+                infoWindow: InfoWindow(title: widget.deliveryAddress!.streetAddress, snippet: widget.deliveryAddress!.notes),
+              )
+            };
+          } else {
+            _markers = deliveryProvider.addresses.where((a) => a.hasCoordinates).map((address) {
+              return Marker(
+                markerId: MarkerId(address.id),
+                position: LatLng(address.latitude!, address.longitude!),
+                infoWindow: InfoWindow(title: address.streetAddress, snippet: address.notes),
+              );
+            }).toSet();
+          }
+
+          _moveCameraToLocation(locationProvider.currentLocation!);
+
+          return GoogleMap(
+            mapType: MapType.normal,
+            initialCameraPosition: _kGooglePlex,
+            onMapCreated: (GoogleMapController controller) {
+              _controller.complete(controller);
+            },
+            myLocationEnabled: true,
+            myLocationButtonEnabled: true,
+            markers: _markers,
+            polylines: _polylines,
+          );
+        },
+      ),
     );
   }
 }

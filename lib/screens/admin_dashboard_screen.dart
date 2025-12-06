@@ -4,18 +4,19 @@ import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../providers/auth_provider.dart';
 import 'inbox.dart'; // Import the InboxPage
 import '../models/delivery_address.dart';
+import '../models/order_model.dart';
 import '../models/user_model.dart';
 import '../services/firestore_service.dart';
 import '../services/profile_service.dart';
 import '../widgets/address_list.dart';
 import '../widgets/add_edit_address_dialog.dart';
-import '../widgets/assign_drivers_dialog.dart';
-import '../widgets/drivers_list.dart';
+import 'view_drivers_screen.dart';
+import 'view_orders_screen.dart';
+import 'completed_orders_screen.dart';
 import '../services/notification_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
@@ -28,20 +29,16 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final ProfileService _profileService = ProfileService();
-  final GlobalKey<AddressListState> _addressListKey = GlobalKey<AddressListState>();
-  Set<String> _selectedAddressIds = {};
   User? _initializedUser;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final user = Provider.of<AuthProvider>(context, listen: false).user;
-    // Initialize notifications when user logs in
     if (user != null && user != _initializedUser) {
       _initAdminNotifications(user);
       _initializedUser = user;
     } else if (user == null) {
-      // User logged out, so reset
       _initializedUser = null;
     }
   }
@@ -156,12 +153,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  void _onSelectionChanged(Set<String> selectedIds) {
-    setState(() {
-      _selectedAddressIds = selectedIds;
-    });
-  }
-
   void _showAddEditAddressDialog({DeliveryAddress? address}) {
     final user = Provider.of<AuthProvider>(context, listen: false).user;
     if (user == null) return;
@@ -255,48 +246,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   void _deleteAddress(String addressId) {
     _firestoreService.deleteAddress(addressId);
-    setState(() {
-      _selectedAddressIds.remove(addressId);
-    });
   }
 
   void _reassignAddress(String addressId) {
     _firestoreService.reassignAddress(addressId);
   }
 
-  void _removeDriverRole(String uid) {
-    _firestoreService.removeDriverRole(uid);
-  }
-
-  void _showAssignDriversDialog() async {
-    final user = Provider.of<AuthProvider>(context, listen: false).user;
-    if (user == null || _selectedAddressIds.isEmpty) return;
-
-    final adminProfile = await _profileService.getProfile(user.uid, 'admin');
-    final companyId = adminProfile?['companyId'] as String?;
-
-    final drivers = companyId != null && companyId.isNotEmpty
-        ? await _firestoreService.getDriversByCompany(companyId).first
-        : await _firestoreService.getFreelanceDrivers().first;
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AssignDriversDialog(
-        drivers: drivers,
-        onAssign: (selectedDriverIds) {
-          _firestoreService.assignAddressesToDrivers(
-            _selectedAddressIds.toList(),
-            selectedDriverIds,
-          );
-          // Clear the selection in this screen's state
-          setState(() {
-            _selectedAddressIds.clear();
-          });
-          // Also clear the selection in the child AddressList widget
-          _addressListKey.currentState?.clearSelection();
-        },
+  Widget _buildTitle(String title) {
+    return Container(
+      padding: const EdgeInsets.all(8.0),
+      color: const Color(0xFF0D2B0D), // Dark green
+      child: Center(
+        child: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+        ),
       ),
     );
   }
@@ -304,141 +268,112 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildLoggedInView(BuildContext context, User user) {
     return Padding(
       padding: const EdgeInsets.all(16.0),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            flex: 3, // 75% of the space
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 16.0,
-                      runSpacing: 8.0,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/view-orders'),
-                          icon: const Icon(Icons.view_list),
-                          label: const Text('View Orders'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                            backgroundColor: Colors.indigo,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/assigned-addresses'),
-                          icon: const Icon(Icons.assignment_turned_in),
-                          label: const Text('View Assigned Addresses'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                            backgroundColor: Colors.indigo,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/admin-route-history'),
-                          icon: const Icon(Icons.history),
-                          label: const Text('Route History'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                            backgroundColor: const Color(0xFF2E7D32), // kAdminGreen
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 16.0,
-                      runSpacing: 8.0,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: () => _showAddEditAddressDialog(),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Address'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                          ),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: () => Navigator.of(context).pushNamed('/add-order'),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Order'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                          ),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: _showUploadCsvDialog,
-                          icon: const Icon(Icons.upload_file),
-                          label: const Text('Upload CSV'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+          Wrap(
+            spacing: 16.0,
+            runSpacing: 8.0,
+            children: [
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ViewDriversScreen()),
+                  );
+                },
+                icon: const Icon(Icons.group),
+                label: const Text('View Drivers'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
                 ),
-                if (_selectedAddressIds.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 16.0),
-                    child: ElevatedButton.icon(
-                      onPressed: _showAssignDriversDialog,
-                      icon: const Icon(Icons.assignment_ind),
-                      label: Text('Assign Selected (${_selectedAddressIds.length})'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 24),
-                Text(
-                  'List of Addresses',
-                  style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).pushNamed('/admin-route-history'),
+                icon: const Icon(Icons.history),
+                label: const Text('Route History'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  backgroundColor: const Color(0xFF2E7D32), // kAdminGreen
+                  foregroundColor: Colors.white,
                 ),
-                Expanded(
-                  child: AddressList(
-                    key: _addressListKey,
-                    onEdit: (address) => _showAddEditAddressDialog(address: address),
-                    onDelete: _deleteAddress,
-                    onReassign: _reassignAddress,
-                    addressesStream: _firestoreService.getAddresses(user.uid),
-                    onSelectionChanged: _onSelectionChanged,
-                  ),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const CompletedOrdersScreen()),
+                  );
+                },
+                icon: const Icon(Icons.check_circle),
+                label: const Text('Completed Orders'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  backgroundColor: const Color(0xFF2E7D32), // kAdminGreen
+                  foregroundColor: Colors.white,
                 ),
-              ],
-            ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _showAddEditAddressDialog(),
+                icon: const Icon(Icons.add),
+                label: const Text('Add Address'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).pushNamed('/add-order'),
+                icon: const Icon(Icons.add),
+                label: const Text('Add Order'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _showUploadCsvDialog,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('Upload CSV'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                ),
+              ),
+            ],
           ),
-          const VerticalDivider(width: 32),
+          const SizedBox(height: 24),
           Expanded(
-            flex: 1, // 25% of the space
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Active Drivers', style: Theme.of(context).textTheme.headlineSmall),
                 Expanded(
-                  child: FutureBuilder<Map<String, dynamic>?>(
-                    future: _profileService.getProfile(user.uid, 'admin'),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-
-                      final companyId = snapshot.data?['companyId'] as String?;
-
-                      return DriversList(
-                        driversStream: companyId != null && companyId.isNotEmpty
-                            ? _firestoreService.getDriversByCompany(companyId)
-                            : _firestoreService.getFreelanceDrivers(),
-                        onRemoveDriver: _removeDriverRole,
-                      );
-                    },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildTitle('List of Addresses'),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: AddressList(
+                          onEdit: (address) => _showAddEditAddressDialog(address: address),
+                          onDelete: _deleteAddress,
+                          onReassign: _reassignAddress,
+                          addressesStream: _firestoreService.getAddresses(user.uid),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const VerticalDivider(),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildTitle('List of Orders'),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: ViewOrdersScreen(showAppBar: false),
+                      ),
+                    ],
                   ),
                 ),
               ],

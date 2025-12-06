@@ -35,6 +35,23 @@ class DeliveryAddress {
 
   bool get hasCoordinates => latitude != null && longitude != null;
 
+  factory DeliveryAddress.fromCoordinates({
+    required double latitude,
+    required double longitude,
+  }) {
+    return DeliveryAddress(
+      id: const Uuid().v4(),
+      userId: '', // This should be filled in with the actual user ID when available
+      streetAddress: '', // Reverse geocoding would be needed to fill this
+      city: '',
+      state: '',
+      zipCode: '',
+      latitude: latitude,
+      longitude: longitude,
+      createdAt: DateTime.now(),
+    );
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'userId': userId,

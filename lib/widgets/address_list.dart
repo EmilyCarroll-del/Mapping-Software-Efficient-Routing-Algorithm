@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
 import '../models/delivery_address.dart';
 
-typedef SelectionChangedCallback = void Function(Set<String> selectedIds);
-
 class AddressList extends StatefulWidget {
   final Stream<List<DeliveryAddress>> addressesStream;
   final Function(DeliveryAddress) onEdit;
   final Function(String) onDelete;
   final Function(String) onReassign;
-  final SelectionChangedCallback onSelectionChanged;
   final bool isReadOnly;
-  final bool showSectionHeaders;
 
   const AddressList({
     super.key,
@@ -18,9 +14,7 @@ class AddressList extends StatefulWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onReassign,
-    required this.onSelectionChanged,
     this.isReadOnly = false,
-    this.showSectionHeaders = true,
   });
 
   @override
@@ -28,45 +22,11 @@ class AddressList extends StatefulWidget {
 }
 
 class AddressListState extends State<AddressList> {
-  Set<String> _selectedAddressIds = {};
-  List<DeliveryAddress> _availableAddresses = [];
-  bool _isSelectAll = false;
 
   void clearSelection() {
-    setState(() {
-      _selectedAddressIds.clear();
-      _isSelectAll = false;
-    });
   }
 
-  void _handleAddressSelection(String addressId, bool isSelected) {
-    setState(() {
-      if (isSelected) {
-        _selectedAddressIds.add(addressId);
-      } else {
-        _selectedAddressIds.remove(addressId);
-      }
-      _isSelectAll = _availableAddresses.isNotEmpty &&
-          _selectedAddressIds.length == _availableAddresses.length;
-    });
-    widget.onSelectionChanged(_selectedAddressIds);
-  }
-
-  void _toggleSelectAll() {
-    setState(() {
-      if (_isSelectAll) {
-        _selectedAddressIds.clear();
-        _isSelectAll = false;
-      } else {
-        _selectedAddressIds = _availableAddresses.map((addr) => addr.id).toSet();
-        _isSelectAll = true;
-      }
-    });
-    widget.onSelectionChanged(_selectedAddressIds);
-  }
-
-  Widget _buildAddressTile(DeliveryAddress address, {bool isSelectable = true}) {
-    final isSelected = _selectedAddressIds.contains(address.id);
+  Widget _buildAddressTile(DeliveryAddress address) {
     final capitalizedStatus = address.status.isEmpty
         ? ''
         : '${address.status[0].toUpperCase()}${address.status.substring(1)}'.replaceAll('_', ' ');
@@ -74,16 +34,6 @@ class AddressListState extends State<AddressList> {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 4.0),
       child: ListTile(
-        leading: widget.isReadOnly || !isSelectable
-            ? null
-            : Checkbox(
-                value: isSelected,
-                onChanged: (bool? value) {
-                  if (value != null) {
-                    _handleAddressSelection(address.id, value);
-                  }
-                },
-              ),
         title: Text(address.fullAddress),
         subtitle: Text('Status: $capitalizedStatus'),
         trailing: widget.isReadOnly
@@ -96,7 +46,7 @@ class AddressListState extends State<AddressList> {
                       onPressed: () => widget.onReassign(address.id),
                       child: const Text('Reassign', style: TextStyle(color: Colors.orange)),
                     ),
-                  if (address.status != 'reserved') ...[
+                  if (address.status != 'reserved' && address.status != 'in_progress') ...[
                     IconButton(
                       icon: const Icon(Icons.edit, color: Colors.blue),
                       onPressed: () => widget.onEdit(address),
@@ -128,58 +78,19 @@ class AddressListState extends State<AddressList> {
         }
 
         final allAddresses = snapshot.data!;
-        final reservedAddresses = allAddresses.where((a) => a.status == 'reserved').toList();
-        _availableAddresses = allAddresses.where((a) => a.status != 'reserved').toList();
+        // We only want to show addresses that are not part of an order yet
+        final availableAddresses = allAddresses.where((a) => a.status != 'reserved').toList();
 
-        final availableIds = _availableAddresses.map((e) => e.id).toSet();
-        _selectedAddressIds.removeWhere((id) => !availableIds.contains(id));
+        if (availableAddresses.isEmpty) {
+          return const Center(child: Text('No available addresses to display.'));
+        }
 
-        return CustomScrollView(
-          slivers: [
-            if (_availableAddresses.isNotEmpty && !widget.isReadOnly)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        value: _isSelectAll,
-                        onChanged: (bool? value) {
-                          _toggleSelectAll();
-                        },
-                      ),
-                      const Text('Select All'),
-                    ],
-                  ),
-                ),
-              ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final address = _availableAddresses[index];
-                  return _buildAddressTile(address, isSelectable: true);
-                },
-                childCount: _availableAddresses.length,
-              ),
-            ),
-            if (widget.showSectionHeaders && reservedAddresses.isNotEmpty) ...[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text('Included in Orders', style: Theme.of(context).textTheme.titleLarge),
-                ),
-              ),
-            ],
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final address = reservedAddresses[index];
-                  return _buildAddressTile(address, isSelectable: false);
-                },
-                childCount: reservedAddresses.length,
-              ),
-            ),
-          ],
+        return ListView.builder(
+          itemCount: availableAddresses.length,
+          itemBuilder: (context, index) {
+            final address = availableAddresses[index];
+            return _buildAddressTile(address);
+          },
         );
       },
     );

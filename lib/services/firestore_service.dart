@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/delivery_address.dart';
 import '../models/order_model.dart';
 import '../models/user_model.dart';
+import 'geocoding_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -30,8 +31,9 @@ class FirestoreService {
             snapshot.docs.map((doc) => DeliveryAddress.fromJson(doc.data())).toList());
   }
 
-  Future<void> saveAddress(DeliveryAddress address) {
-    return _db.collection(_addressesCollectionPath).doc(address.id).set(address.toJson());
+  Future<void> saveAddress(DeliveryAddress address) async {
+    final geocodedAddress = await GeocodingService.geocodeAddress(address);
+    return _db.collection(_addressesCollectionPath).doc(address.id).set(geocodedAddress.toJson());
   }
 
   Future<void> saveAddressesFromCsv(List<DeliveryAddress> addresses) async {
@@ -250,15 +252,78 @@ class FirestoreService {
     });
   }
 
+  Stream<List<OrderModel>> getCompletedOrders(String adminId) {
+    return _db
+        .collection(_ordersCollectionPath)
+        .where('adminId', isEqualTo: adminId)
+        .where('status', isEqualTo: 'completed')
+        .snapshots()
+        .map((snapshot) {
+      final orders =
+          snapshot.docs.map((doc) => OrderModel.fromJson(doc.data())).toList();
+      orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return orders;
+    });
+  }
+
+  Stream<List<OrderModel>> getDriverOrders(String driverId) {
+    return _db
+        .collection(_ordersCollectionPath)
+        .where('driverIds', arrayContains: driverId)
+        .where('status', whereIn: ['assigned', 'accepted', 'in_progress'])
+        .snapshots()
+        .map((snapshot) {
+      final orders =
+          snapshot.docs.map((doc) => OrderModel.fromJson(doc.data())).toList();
+      orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return orders;
+    });
+  }
+
+  Future<void> updateOrderStatus(String orderId, String status) {
+    return _db.collection(_ordersCollectionPath).doc(orderId).update({
+      'status': status,
+    });
+  }
+
+  Future<void> reassignOrder(String orderId) {
+    final orderRef = _db.collection(_ordersCollectionPath).doc(orderId);
+    return _db.runTransaction((transaction) async {
+      transaction.update(orderRef, {
+        'status': 'pending',
+        'driverIds': [],
+      });
+    });
+  }
+
+  Future<void> denyOrder(String orderId, String driverId) {
+    final orderRef = _db.collection(_ordersCollectionPath).doc(orderId);
+    return _db.runTransaction((transaction) async {
+      final orderSnapshot = await transaction.get(orderRef);
+      if (!orderSnapshot.exists) return;
+
+      final order = OrderModel.fromJson(orderSnapshot.data()!);
+      final newDriverIds = List<String>.from(order.driverIds)..remove(driverId);
+
+      transaction.update(orderRef, {
+        'driverIds': newDriverIds,
+        'status': newDriverIds.isEmpty ? 'pending' : order.status,
+      });
+    });
+  }
+
   Future<void> createOrder({
     required String orderId,
     required String adminId,
     required DeliveryAddress pickUpAddress,
     required List<DeliveryAddress> dropOffAddresses,
   }) async {
-    final reservedPickUp = pickUpAddress.copyWith(status: 'reserved');
+    final geocodedPickUp = await GeocodingService.geocodeAddress(pickUpAddress);
+    final geocodedDropOffs = await GeocodingService.geocodeAddresses(dropOffAddresses);
+
+    final reservedPickUp = geocodedPickUp.copyWith(status: 'reserved');
     final reservedDropOffs =
-        dropOffAddresses.map((a) => a.copyWith(status: 'reserved')).toList();
+        geocodedDropOffs.map((a) => a.copyWith(status: 'reserved')).toList();
 
     final order = OrderModel(
       orderId: orderId,

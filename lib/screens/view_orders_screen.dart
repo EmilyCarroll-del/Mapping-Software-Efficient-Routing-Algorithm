@@ -8,7 +8,9 @@ import '../services/firestore_service.dart';
 import '../services/profile_service.dart';
 
 class ViewOrdersScreen extends StatelessWidget {
-  const ViewOrdersScreen({super.key});
+  final bool showAppBar;
+
+  const ViewOrdersScreen({super.key, this.showAppBar = true});
 
   void _showAssignDriverDialog(BuildContext context, OrderModel order) {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -85,9 +87,9 @@ class ViewOrdersScreen extends StatelessWidget {
       builder: (context, authProvider, child) {
         final user = authProvider.user;
         return Scaffold(
-          appBar: AppBar(
+          appBar: showAppBar ? AppBar(
             title: const Text('List of Orders'),
-          ),
+          ) : null,
           body: user == null
               ? const Center(child: Text('Please log in to view orders.'))
               : StreamBuilder<List<OrderModel>>(
@@ -103,13 +105,18 @@ class ViewOrdersScreen extends StatelessWidget {
                       return const Center(child: Text('No orders found.'));
                     }
 
-                    final orders = snapshot.data!;
+                    final orders = snapshot.data!.where((order) => order.status != 'completed').toList();
+
+                    if (orders.isEmpty) {
+                      return const Center(child: Text('No active orders found.'));
+                    }
 
                     return ListView.builder(
                       itemCount: orders.length,
                       itemBuilder: (context, index) {
                         final order = orders[index];
                         final isDenied = order.status == 'denied';
+                        final isInProgress = order.status == 'in_progress';
 
                         return Card(
                           margin: const EdgeInsets.all(8.0),
@@ -122,24 +129,25 @@ class ViewOrdersScreen extends StatelessWidget {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text('Order ID: ${order.orderId}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                    Row(
-                                      children: [
-                                        ElevatedButton(
-                                          onPressed: () {
-                                            if (isDenied) {
-                                              firestoreService.unassignOrder(order.orderId);
-                                            } else {
-                                              _showAssignDriverDialog(context, order);
-                                            }
-                                          },
-                                          child: Text(isDenied ? 'Reassign' : 'Assign'),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.delete, color: Colors.red),
-                                          onPressed: () => firestoreService.deleteOrder(order.orderId),
-                                        ),
-                                      ],
-                                    ),
+                                    if (!isInProgress)
+                                      Row(
+                                        children: [
+                                          ElevatedButton(
+                                            onPressed: () {
+                                              if (isDenied) {
+                                                firestoreService.unassignOrder(order.orderId);
+                                              } else {
+                                                _showAssignDriverDialog(context, order);
+                                              }
+                                            },
+                                            child: Text(isDenied ? 'Reassign' : 'Assign'),
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete, color: Colors.red),
+                                            onPressed: () => firestoreService.deleteOrder(order.orderId),
+                                          ),
+                                        ],
+                                      ),
                                   ],
                                 ),
                                 const SizedBox(height: 8),

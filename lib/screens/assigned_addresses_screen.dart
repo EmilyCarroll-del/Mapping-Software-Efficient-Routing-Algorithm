@@ -36,9 +36,7 @@ class AssignedAddressesScreen extends StatelessWidget {
                         onEdit: (address) {},
                         onDelete: (addressId) {},
                         onReassign: (addressId) {},
-                        onSelectionChanged: (selectedIds) {},
                         isReadOnly: true,
-                        showSectionHeaders: true, // Group by status
                       ),
                     ),
                   ),
