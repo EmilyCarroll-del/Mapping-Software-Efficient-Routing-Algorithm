@@ -11,7 +11,9 @@ import '../services/google_auth_service.dart';
 import '../services/company_service.dart';
 import '../services/profile_service.dart';
 import '../services/code_assignment_service.dart';
+import '../services/firestore_service.dart';
 import '../models/company_model.dart';
+import '../models/order.dart' as app_order;
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -38,6 +40,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final CompanyService _companyService = CompanyService();
   final ProfileService _profileService = ProfileService();
   final CodeAssignmentService _codeAssignmentService = CodeAssignmentService();
+  final FirestoreService _firestoreService = FirestoreService();
   List<Company> _companies = [];
   String? _selectedCompanyCode;
   bool _loadingCompanies = false;
@@ -47,6 +50,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _totalDeliveries = 0;
   double _totalDistance = 0.0;
   double _averageEfficiency = 0.0;
+  bool _statsLoading = false;
+  String? _statsError;
 
   @override
   void initState() {
@@ -164,35 +169,252 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadUserStats() async {
+    if (_user == null) return;
+    
+    if (mounted) {
+      setState(() {
+        _statsLoading = true;
+        _statsError = null;
+      });
+    }
+    
+    // Initialize with empty values in case of errors
+    int totalRoutes = 0;
+    int totalDeliveries = 0;
+    double totalDistance = 0.0;
+    double averageEfficiency = 0.0;
+    
     try {
-      if (_user != null) {
-        QuerySnapshot deliveriesSnapshot = await FirebaseFirestore.instance
+      print('📊 Loading user stats for driver: ${_user!.uid}');
+      
+      // Use FirestoreService to get completed orders (same method Route History uses)
+      List<app_order.Order> completedOrders = [];
+      try {
+        // The stream should emit data even if there are errors (it emits empty lists on error)
+        // So we can safely use .first, but wrap it to handle any errors
+        completedOrders = await _firestoreService
+            .getDriverCompletedAddresses(_user!.uid)
+            .timeout(const Duration(seconds: 10))
+            .first
+            .catchError((error) {
+          print('❌ Stream error in getDriverCompletedAddresses: $error');
+          if (error.toString().contains('permission-denied') || 
+              error.toString().contains('Permission denied')) {
+            _statsError = 'Permission denied: Cannot read orders';
+          }
+          return <app_order.Order>[]; // Return empty list on error
+        });
+        print('📦 Found ${completedOrders.length} completed orders (from FirestoreService)');
+        if (completedOrders.isNotEmpty) {
+          print('   Sample order ID: ${completedOrders.first.id}');
+        }
+      } catch (e) {
+        print('❌ Error getting completed orders from FirestoreService: $e');
+        print('   Error type: ${e.runtimeType}');
+        print('   Error string: ${e.toString()}');
+        if (e.toString().contains('permission-denied') || 
+            e.toString().contains('Permission denied')) {
+          _statsError = 'Permission denied: Cannot read orders';
+        } else if (e.toString().contains('TimeoutException')) {
+          print('   ⚠️ Timeout waiting for stream, continuing with empty list');
+        } else {
+          // If it's not a permission error, it might be a timeout or other issue
+          print('   ⚠️ Non-permission error, continuing with empty list');
+        }
+        completedOrders = []; // Ensure we have an empty list
+      }
+      
+      // Query route optimizations from user's subcollection (all routes, not just completed)
+      // This should work since it's under the user's own document
+      QuerySnapshot routeOptimizationsSnapshot;
+      try {
+        routeOptimizationsSnapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(_user!.uid)
+            .collection('routeOptimizations')
+            .get();
+        print('🗺️ Found ${routeOptimizationsSnapshot.docs.length} route optimizations');
+        if (routeOptimizationsSnapshot.docs.isNotEmpty) {
+          final sampleRoute = routeOptimizationsSnapshot.docs.first.data() as Map<String, dynamic>;
+          print('   Sample route data keys: ${sampleRoute.keys.toList()}');
+          print('   Sample route totalDistance: ${sampleRoute['totalDistance']}');
+        }
+      } catch (e) {
+        print('❌ Error querying routeOptimizations collection: $e');
+        if (e.toString().contains('permission-denied')) {
+          _statsError = (_statsError != null ? '$_statsError. ' : '') + 'Cannot read routes';
+        }
+        // Create empty snapshot by querying a non-existent document - this will return empty
+        try {
+          routeOptimizationsSnapshot = await FirebaseFirestore.instance
+              .collection('users')
+              .doc('temp-empty-${DateTime.now().millisecondsSinceEpoch}')
+              .collection('routeOptimizations')
+              .limit(1)
+              .get();
+        } catch (e2) {
+          // If that fails too, just query the user's own collection with a filter that returns nothing
+          // Use a field that exists but with a value that won't match anything
+          routeOptimizationsSnapshot = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(_user!.uid)
+              .collection('routeOptimizations')
+              .where('createdAt', isEqualTo: Timestamp.fromDate(DateTime(1970)))
+              .limit(1)
+              .get();
+        }
+      }
+      
+      // Also check legacy 'deliveries' collection for backward compatibility
+      QuerySnapshot legacyDeliveriesSnapshot;
+      try {
+        legacyDeliveriesSnapshot = await FirebaseFirestore.instance
             .collection('deliveries')
             .where('driverId', isEqualTo: _user!.uid)
             .where('status', isEqualTo: 'completed')
             .get();
-
-        QuerySnapshot allDeliveriesSnapshot = await FirebaseFirestore.instance
-            .collection('deliveries')
-            .where('driverId', isEqualTo: _user!.uid)
-            .get();
-
-        int totalRoutes = allDeliveriesSnapshot.docs.length;
-        int totalDeliveries = deliveriesSnapshot.docs.length;
-        double totalDistance = 0.0;
-        double averageEfficiency = totalDeliveries > 0 ? 95.0 : 0.0;
-
-        if (mounted) {
-          setState(() {
-            _totalRoutes = totalRoutes;
-            _totalDeliveries = totalDeliveries;
-            _totalDistance = totalDistance;
-            _averageEfficiency = averageEfficiency;
-          });
+        print('📋 Found ${legacyDeliveriesSnapshot.docs.length} legacy completed deliveries');
+      } catch (e) {
+        print('❌ Error querying deliveries collection: $e');
+        // Create empty snapshot - query for a non-existent driverId (valid field, just no matches)
+        try {
+          legacyDeliveriesSnapshot = await FirebaseFirestore.instance
+              .collection('deliveries')
+              .where('driverId', isEqualTo: 'temp-empty-${DateTime.now().millisecondsSinceEpoch}')
+              .limit(1)
+              .get();
+        } catch (e2) {
+          // If that fails, use a date filter that won't match anything
+          legacyDeliveriesSnapshot = await FirebaseFirestore.instance
+              .collection('deliveries')
+              .where('createdAt', isEqualTo: Timestamp.fromDate(DateTime(1970)))
+              .limit(1)
+              .get();
         }
       }
-    } catch (e) {
-      print('Error loading user stats: $e');
+      
+      // Count total routes (from routeOptimizations - all routes, not just completed)
+      int totalRoutes = routeOptimizationsSnapshot.docs.length;
+      
+      // Count total deliveries (from completed orders + legacy deliveries)
+      int totalDeliveries = completedOrders.length + legacyDeliveriesSnapshot.docs.length;
+      
+      // Calculate total distance from completed orders
+      double totalDistance = 0.0;
+      for (var order in completedOrders) {
+        // Try to get distance from the order's route optimization if available
+        // For now, we'll need to check if the order has distance data stored
+        // Since Order model doesn't have distance, we might need to query the original document
+        // But for now, let's skip this and rely on routeOptimizations for distance
+      }
+      
+      // Add distance from route optimizations (all routes, for total distance driven)
+      for (var doc in routeOptimizationsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final distance = data['totalDistance'];
+        if (distance != null) {
+          final distValue = (distance is num) ? distance.toDouble() : 0.0;
+          totalDistance += distValue;
+          print('   Route ${doc.id}: distance = $distValue km');
+        }
+      }
+      
+      // Calculate efficiency from actual vs estimated duration
+      // We need to get the actual order documents to access distance and duration
+      double totalEfficiency = 0.0;
+      int efficiencyCount = 0;
+      
+      // Query the actual order documents to get distance and duration data
+      // Skip individual document queries if we already have permission errors to avoid more errors
+      if (_statsError == null || !_statsError!.contains('permission-denied')) {
+        for (var order in completedOrders) {
+          try {
+            DocumentSnapshot? orderDoc;
+            if (order.sourceCollection == 'orders') {
+              orderDoc = await FirebaseFirestore.instance
+                  .collection('orders')
+                  .doc(order.id)
+                  .get();
+            } else if (order.sourceCollection == 'addresses') {
+              orderDoc = await FirebaseFirestore.instance
+                  .collection('addresses')
+                  .doc(order.id)
+                  .get();
+            }
+            
+            if (orderDoc != null && orderDoc.exists) {
+              final data = orderDoc.data() as Map<String, dynamic>;
+              
+              // Get distance
+              final distance = data['totalDistanceKm'];
+              if (distance != null) {
+                final distValue = (distance is num) ? distance.toDouble() : 0.0;
+                totalDistance += distValue;
+                print('   Order ${order.id}: distance = $distValue km');
+              }
+              
+              // Get efficiency data
+              final actualDuration = data['actualDurationSeconds'];
+              final estimatedDuration = data['estimatedDurationSeconds'];
+              
+              if (actualDuration != null && estimatedDuration != null) {
+                final actual = (actualDuration is num) ? actualDuration.toDouble() : 0.0;
+                final estimated = (estimatedDuration is num) ? estimatedDuration.toDouble() : 0.0;
+                
+                if (actual > 0 && estimated > 0) {
+                  final efficiency = (estimated / actual) * 100;
+                  totalEfficiency += efficiency;
+                  efficiencyCount++;
+                  print('   Order ${order.id}: actual=${actual}s, estimated=${estimated}s, efficiency=${efficiency.toStringAsFixed(1)}%');
+                }
+              }
+            }
+          } catch (e) {
+            print('   ⚠️ Error getting details for order ${order.id}: $e');
+            if (e.toString().contains('permission-denied')) {
+              _statsError = (_statsError != null ? '$_statsError. ' : '') + 'Cannot read order details';
+              break; // Stop trying if we hit permission errors
+            }
+          }
+        }
+      } else {
+        print('   ⚠️ Skipping individual order queries due to existing permission errors');
+      }
+      
+      // Calculate average efficiency
+      averageEfficiency = efficiencyCount > 0 
+          ? (totalEfficiency / efficiencyCount).clamp(0.0, 200.0) // Cap at 200% for sanity
+          : 0.0;
+      
+      print('✅ Stats calculated:');
+      print('   Routes: $totalRoutes');
+      print('   Deliveries: $totalDeliveries');
+      print('   Distance: ${totalDistance.toStringAsFixed(2)} km');
+      print('   Efficiency: ${averageEfficiency.toStringAsFixed(1)}% (from $efficiencyCount deliveries)');
+      
+      if (mounted) {
+        setState(() {
+          _totalRoutes = totalRoutes;
+          _totalDeliveries = totalDeliveries;
+          _totalDistance = totalDistance;
+          _averageEfficiency = averageEfficiency;
+          _statsLoading = false;
+        });
+      }
+    } catch (e, stackTrace) {
+      print('❌ Fatal error loading user stats: $e');
+      print('❌ Stack trace: $stackTrace');
+      // Set defaults on error
+      if (mounted) {
+        setState(() {
+          _totalRoutes = 0;
+          _totalDeliveries = 0;
+          _totalDistance = 0.0;
+          _averageEfficiency = 0.0;
+          _statsLoading = false;
+          _statsError = 'Failed to load stats: ${e.toString()}';
+        });
+      }
     }
   }
 
@@ -460,7 +682,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            Card(child: Padding(padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Icon(Icons.analytics, color: kPrimaryColor), const SizedBox(width: 8), const Text('Route Optimization Stats', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]), const SizedBox(height: 16), Row(children: [_buildStatCard('Routes', _totalRoutes.toString(), Icons.route, kPrimaryColor), _buildStatCard('Deliveries', _totalDeliveries.toString(), Icons.local_shipping, kAccentColor), _buildStatCard('Distance (km)', _totalDistance.toStringAsFixed(1), Icons.straighten, Colors.orange), _buildStatCard('Efficiency', '${_averageEfficiency.toStringAsFixed(1)}%', Icons.trending_up, Colors.green)])]))),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.analytics, color: kPrimaryColor),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Route Optimization Stats',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: _statsLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.refresh),
+                          onPressed: _statsLoading ? null : _loadUserStats,
+                          tooltip: 'Refresh stats',
+                          color: kPrimaryColor,
+                        ),
+                      ],
+                    ),
+                    if (_statsError != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.red[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red[200]!),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error_outline, color: Colors.red[700], size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _statsError!,
+                                style: TextStyle(color: Colors.red[700], fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        _buildStatCard('Routes', _totalRoutes.toString(), Icons.route, kPrimaryColor),
+                        _buildStatCard('Deliveries', _totalDeliveries.toString(), Icons.local_shipping, kAccentColor),
+                        _buildStatCard('Distance (km)', _totalDistance.toStringAsFixed(1), Icons.straighten, Colors.orange),
+                        _buildStatCard('Efficiency', '${_averageEfficiency.toStringAsFixed(1)}%', Icons.trending_up, Colors.green),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             Card(child: Padding(padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Profile Information', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 16), Row(children: [const Icon(Icons.qr_code), const SizedBox(width: 8), Expanded(child: _isEditing ? _loadingCompanies ? const SizedBox(height: 48, child: Center(child: CircularProgressIndicator())) : Builder(builder: (context) {String? validValue; if (_selectedCompanyCode != null && _selectedCompanyCode!.isNotEmpty) {if (_companies.any((c) => c.code == _selectedCompanyCode)) validValue = _selectedCompanyCode;} return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Expanded(child: DropdownButton<String?>(value: validValue, isExpanded: true, hint: const Text('Select company (or leave blank)'), items: [const DropdownMenuItem<String?>(value: null, child: Text('None (Freelancer)')), ..._companies.map((company) => DropdownMenuItem<String?>(value: company.code, child: Text('${company.name} (${company.code})')))], onChanged: (String? value) => setState(() { _selectedCompanyCode = value; _companyCodeController.text = value ?? ''; }))), IconButton(icon: const Icon(Icons.keyboard), tooltip: 'Enter code manually', onPressed: _showManualCodeEntryDialog)]), const SizedBox(height: 4), FutureBuilder<Company?>(future: _companyService.getCompanyByCodeOrRange(_companyCodeController.text.trim()), builder: (context, snapshot) {final company = snapshot.data; final hasCode = _companyCodeController.text.trim().isNotEmpty; String message = hasCode ? (company != null ? 'Company driver - linked to ${company.name}' : 'Company driver - linked to company') : 'Freelance driver - can work with any admin'; return Text(message, style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic));})]);}) : Builder(builder: (context) {final companyCode = _companyCodeController.text; if (companyCode.isEmpty) return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('No company code', style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.bold)), Text('Freelance Driver - Can work with any admin', style: TextStyle(fontSize: 11, color: Colors.grey[500], fontStyle: FontStyle.italic))]); return FutureBuilder<Company?>(future: _companyService.getCompanyByCodeOrRange(companyCode), builder: (context, snapshot) {if (snapshot.connectionState == ConnectionState.waiting) return const Text('Loading...'); final company = snapshot.data; if (company != null) {return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${company.name} (${companyCode})', style: const TextStyle(fontWeight: FontWeight.bold)), Text('Company Driver - Linked to ${company.name}', style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic))]);} else {return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Company Code: $companyCode', style: const TextStyle(fontWeight: FontWeight.bold)), Text('Company Driver - Linked via company code', style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic))]);}});}))]), const SizedBox(height: 16), Row(children: [const Icon(Icons.phone), const SizedBox(width: 8), Expanded(child: _isEditing ? TextField(controller: _phoneController, decoration: const InputDecoration(hintText: 'Enter phone number', border: InputBorder.none)) : Text(_phoneController.text.isNotEmpty ? _phoneController.text : 'No phone number', style: TextStyle(color: _phoneController.text.isEmpty ? Colors.grey[500] : null)))]), const SizedBox(height: 16), Row(crossAxisAlignment: CrossAxisAlignment.start, children: [const Icon(Icons.info), const SizedBox(width: 8), Expanded(child: _isEditing ? TextField(controller: _bioController, maxLines: 3, decoration: const InputDecoration(hintText: 'Tell us about yourself...', border: InputBorder.none)) : Text(_bioController.text.isNotEmpty ? _bioController.text : 'No bio added', style: TextStyle(color: _bioController.text.isEmpty ? Colors.grey[500] : null)))])]))),
             const SizedBox(height: 24),

@@ -1,0 +1,106 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user owns this document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Users collection - users can read/write their own profile
+    match /users/{userId} {
+      // Allow authenticated users to read any user profile (needed for chat, admin lookup)
+      allow read: if isAuthenticated();
+      
+      // Only owner can write their own profile
+      allow write: if isOwner(userId);
+      
+      // Subcollection: routeOptimizations - only owner can access
+      match /routeOptimizations/{routeId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      // Subcollection: any other subcollections under user
+      match /{subcollection}/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+    
+    // Orders collection - allow authenticated users to query
+    match /orders/{orderId} {
+      // Allow read for authenticated users (filtering done client-side and by query)
+      allow read: if isAuthenticated();
+      
+      // Allow write for authenticated users
+      allow write: if isAuthenticated();
+      
+      // Allow create for authenticated users
+      allow create: if isAuthenticated();
+    }
+    
+    // Addresses collection - allow authenticated users to query
+    match /addresses/{addressId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+    
+    // Deliveries collection - allow authenticated users to query
+    match /deliveries/{deliveryId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+    
+    // Companies collection - all authenticated users can read
+    match /companies/{companyId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+    
+    // Codes collection - for company code assignment
+    match /codes/{codeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+    
+    // Conversations collection - for messaging (new format)
+    match /conversations/{conversationId} {
+      allow read, write: if isAuthenticated() && 
+        request.auth.uid in resource.data.participants;
+      
+      allow create: if isAuthenticated();
+      
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+    
+    // Chats collection - for messaging (old format uses 'users' array)
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated() && 
+        request.auth.uid in resource.data.users;
+      
+      allow create: if isAuthenticated();
+      
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+    
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow write: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+  }
+}

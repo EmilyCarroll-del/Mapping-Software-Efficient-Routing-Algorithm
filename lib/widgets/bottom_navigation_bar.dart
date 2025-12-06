@@ -19,7 +19,7 @@ class CustomBottomNavigationBar extends StatelessWidget {
     int currentIndex = 0;
     if (currentLocation.startsWith('/inbox')) {
       currentIndex = 1;
-    } else if (currentLocation.startsWith('/profile')) {
+    } else if (currentLocation.startsWith('/profile') || currentLocation.startsWith('/route-history')) {
       currentIndex = 2;
     }
 
