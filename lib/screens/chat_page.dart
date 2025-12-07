@@ -25,6 +25,42 @@ class _ChatPageState extends State<ChatPage> {
   final User? currentUser = FirebaseAuth.instance.currentUser;
 
   @override
+  void initState() {
+    super.initState();
+    _ensureChatParticipants();
+  }
+
+  Future<void> _ensureChatParticipants() async {
+    if (currentUser == null) return;
+    final db = FirebaseFirestore.instance;
+    final chatRef = db.collection('chats').doc(widget.chatId);
+
+    try {
+      final snap = await chatRef.get();
+      if (snap.exists) {
+        final data = snap.data() as Map<String, dynamic>? ?? {};
+        final users = List<String>.from(data['users'] ?? const []);
+        if (!users.contains(currentUser!.uid)) {
+          await chatRef.update({
+            'users': FieldValue.arrayUnion([currentUser!.uid]),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        // Create minimal chat doc so rules pass
+        await chatRef.set({
+          'users': [currentUser!.uid],
+          'lastMessage': '',
+          'lastMessageTime': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to ensure chat participants: $e');
+    }
+  }
+
+  @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();

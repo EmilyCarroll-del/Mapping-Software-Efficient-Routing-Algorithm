@@ -79,11 +79,11 @@ class _LoginPageState extends State<LoginPage> {
       _navigateBasedOnRole(_selectedRole);
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: \${e.message}")),
+        SnackBar(content: Text("Login Failed: ${e.message}")),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login Failed: \${e.toString()}")),
+        SnackBar(content: Text("Login Failed: ${e.toString()}")),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -136,7 +136,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Google Login Failed: \${e.toString()}")),
+          SnackBar(content: Text("Google Login Failed: ${e.toString()}")),
         );
       }
     } finally {

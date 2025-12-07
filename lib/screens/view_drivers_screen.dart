@@ -32,7 +32,7 @@ class ViewDriversScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Active Drivers', style: Theme.of(context).textTheme.headlineSmall),
+                  Text('Freelancer Drivers', style: Theme.of(context).textTheme.headlineSmall),
                   Expanded(
                     child: FutureBuilder<Map<String, dynamic>?>(
                       future: profileService.getProfile(user.uid, 'admin'),
@@ -41,12 +41,9 @@ class ViewDriversScreen extends StatelessWidget {
                           return const Center(child: CircularProgressIndicator());
                         }
 
-                        final companyId = snapshot.data?['companyId'] as String?;
-
                         return DriversList(
-                          driversStream: companyId != null && companyId.isNotEmpty
-                              ? firestoreService.getDriversByCompany(companyId)
-                              : firestoreService.getFreelanceDrivers(),
+                          // Marketplace: show only freelance drivers (no company)
+                          driversStream: firestoreService.getFreelanceDrivers(),
                           onRemoveDriver: _removeDriverRole,
                         );
                       },

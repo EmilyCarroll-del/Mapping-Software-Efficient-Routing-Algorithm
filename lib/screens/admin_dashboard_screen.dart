@@ -150,6 +150,42 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
       body: _buildLoggedInView(context, user),
+      floatingActionButton: PopupMenuButton<String>(
+        onSelected: (value) {
+          if (value == 'address') {
+            _showAddEditAddressDialog();
+          } else if (value == 'order') {
+            Navigator.of(context).pushNamed('/add-order');
+          }
+        },
+        itemBuilder: (context) => [
+          const PopupMenuItem(
+            value: 'address',
+            child: Row(
+              children: [
+                Icon(Icons.location_on),
+                SizedBox(width: 8),
+                Text('Add Address'),
+              ],
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'order',
+            child: Row(
+              children: [
+                Icon(Icons.shopping_cart),
+                SizedBox(width: 8),
+                Text('Add Order'),
+              ],
+            ),
+          ),
+        ],
+        child: FloatingActionButton(
+          onPressed: null,
+          backgroundColor: const Color(0xFF0D2B0D),
+          child: const Icon(Icons.add, color: Colors.white),
+        ),
+      ),
     );
   }
 
@@ -313,22 +349,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   backgroundColor: const Color(0xFF2E7D32), // kAdminGreen
                   foregroundColor: Colors.white,
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => _showAddEditAddressDialog(),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Address'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).pushNamed('/add-order'),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Order'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                 ),
               ),
               OutlinedButton.icon(

@@ -129,12 +129,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _companyController.text = userData['company'] ?? '';
           final companyCode = userData['companyCode'] as String?;
           
-          // Check if stored code is still available, if not get current available code
+          // Keep stored code - only replace if it was claimed by a driver
           String? codeToDisplay = companyCode;
           if (companyCode != null && companyCode.isNotEmpty) {
-            final isAvailable = await _codeAssignmentService.isCodeAvailable(companyCode);
-            if (!isAvailable) {
-              // Code was claimed, get current available code
+            // Check if this code was claimed by a driver (not just missing from assignments)
+            final assignment = await _codeAssignmentService.getCodeAssignment(companyCode);
+            if (assignment != null && 
+                assignment['status'] == 'claimed' && 
+                assignment['adminId'] == _user!.uid) {
+              // Code was claimed from this admin, try to get a new available code
               codeToDisplay = await _codeAssignmentService.getAdminCurrentCode(_user!.uid);
               // Update profile with new code if found
               if (codeToDisplay != null) {
@@ -143,11 +146,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   'admin',
                   {'companyCode': codeToDisplay},
                 );
+              } else {
+                // No new code available, keep the original for display purposes
+                codeToDisplay = companyCode;
               }
             }
-          } else {
-            // No code stored, try to get current available code
-            codeToDisplay = await _codeAssignmentService.getAdminCurrentCode(_user!.uid);
+            // Otherwise keep the stored code as-is (even if not in code_assignments)
           }
           
           _companyCodeController.text = codeToDisplay ?? '';
