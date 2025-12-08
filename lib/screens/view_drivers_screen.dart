@@ -29,30 +29,53 @@ class ViewDriversScreen extends StatelessWidget {
           ? const Center(child: Text('Please log in to see drivers.'))
           : Padding(
               padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Active Drivers', style: Theme.of(context).textTheme.headlineSmall),
-                  Expanded(
-                    child: FutureBuilder<Map<String, dynamic>?>(
-                      future: profileService.getProfile(user.uid, 'admin'),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
+              child: FutureBuilder<Map<String, dynamic>?>(
+                future: profileService.getProfile(user.uid, 'admin'),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                        final companyId = snapshot.data?['companyId'] as String?;
+                  final companyId = snapshot.data?['companyId'] as String?;
 
-                        return DriversList(
-                          driversStream: companyId != null && companyId.isNotEmpty
-                              ? firestoreService.getDriversByCompany(companyId)
-                              : firestoreService.getFreelanceDrivers(),
-                          onRemoveDriver: _removeDriverRole,
-                        );
-                      },
-                    ),
-                  ),
-                ],
+                  if (companyId != null && companyId.isNotEmpty) {
+                    // Company Admin View
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Company Drivers', style: Theme.of(context).textTheme.headlineSmall),
+                        Expanded(
+                          child: DriversList(
+                            driversStream: firestoreService.getDriversByCompany(companyId),
+                            onRemoveDriver: _removeDriverRole,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text('Freelancer Drivers', style: Theme.of(context).textTheme.headlineSmall),
+                        Expanded(
+                          child: DriversList(
+                            driversStream: firestoreService.getFreelanceDrivers(),
+                            onRemoveDriver: _removeDriverRole,
+                          ),
+                        ),
+                      ],
+                    );
+                  } else {
+                    // Freelancer Admin View
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Active Drivers', style: Theme.of(context).textTheme.headlineSmall),
+                        Expanded(
+                          child: DriversList(
+                            driversStream: firestoreService.getFreelanceDrivers(),
+                            onRemoveDriver: _removeDriverRole,
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                },
               ),
             ),
     );

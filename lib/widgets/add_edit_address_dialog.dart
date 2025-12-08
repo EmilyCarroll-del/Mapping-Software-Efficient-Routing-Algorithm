@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -11,12 +10,14 @@ class AddEditAddressDialog extends StatefulWidget {
   final DeliveryAddress? address;
   final String userId;
   final Function(DeliveryAddress) onSave;
+  final VoidCallback? onUploadCsv;
 
   const AddEditAddressDialog({
     super.key,
     this.address,
     required this.userId,
     required this.onSave,
+    this.onUploadCsv,
   });
 
   @override
@@ -27,10 +28,9 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _addressController;
   late TextEditingController _notesController;
-  final _notesFocusNode = FocusNode(); // <-- NEW
+  final _notesFocusNode = FocusNode();
   bool _isLoading = false;
 
-  // Store place details when selected from autocomplete
   PlaceDetail? _selectedPlaceDetail;
 
   @override
@@ -46,13 +46,11 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
     _addressController.removeListener(_onAddressTextChanged);
     _addressController.dispose();
     _notesController.dispose();
-    _notesFocusNode.dispose(); // <-- NEW
+    _notesFocusNode.dispose();
     super.dispose();
   }
 
   void _onAddressTextChanged() {
-    // If user manually edits the text field after selecting a place from autocomplete,
-    // we should invalidate that selection and fall back to manual validation on submit.
     if (_selectedPlaceDetail != null && _addressController.text != _selectedPlaceDetail!.formattedAddress) {
       if (mounted) {
         setState(() {
@@ -68,28 +66,36 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
     final isEditing = widget.address != null;
 
     return AlertDialog(
-      title: Text(isEditing ? 'Edit Address' : 'Add Address'),
+      title: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(isEditing ? 'Edit Address' : 'Add Address'),
+          if (widget.onUploadCsv != null)
+            IconButton(
+              icon: const Icon(Icons.upload_file),
+              onPressed: widget.onUploadCsv,
+              tooltip: 'Upload CSV',
+            ),
+        ],
+      ),
       content: Form(
         key: _formKey,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // -------- Address input (web-only autocomplete; falls back to text on non-web) --------
               if (kIsWeb) ...[
                 AddressAutocompleteField(
-                  apiKey: '', // Not used - server handles the API key
-                  countryCode: null, // null = search globally
+                  apiKey: '', 
+                  countryCode: null,
                   controller: _addressController,
                   onSelected: (place) {
                     debugPrint('Place selected: ${place.formattedAddress}');
                     _selectedPlaceDetail = place;
                     _addressController.text = place.formattedAddress;
-                    // Now move focus to the notes field
                     _notesFocusNode.requestFocus();
                   },
-                  onSubmitted: (_) { // <-- NEW
-                    // When user presses Enter in address field, move to notes
+                  onSubmitted: (_) { 
                     _notesFocusNode.requestFocus();
                   },
                 ),
@@ -114,18 +120,17 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
                     hintText: 'Street, City, State, ZIP Code',
                   ),
                   validator: (value) => value!.isEmpty ? 'Please enter an address' : null,
-                  onFieldSubmitted: (_) { // <-- NEW
+                  onFieldSubmitted: (_) {
                     _notesFocusNode.requestFocus();
                   },
                 ),
               ],
               const SizedBox(height: 16),
-              // ---------------- Notes ----------------
               TextFormField(
                 controller: _notesController,
-                focusNode: _notesFocusNode, // <-- NEW
+                focusNode: _notesFocusNode,
                 decoration: const InputDecoration(labelText: 'Notes (Optional)'),
-                onFieldSubmitted: (_) => _submit(), // <-- NEW
+                onFieldSubmitted: (_) => _submit(),
               ),
             ],
           ),
@@ -156,16 +161,12 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
     setState(() => _isLoading = true);
 
     try {
-      // If address was selected from Places API autocomplete, use that data directly
-      // This bypasses strict validation since Places API already validated the address
       debugPrint('Submitting address. Has place detail: ${_selectedPlaceDetail != null}');
       if (_selectedPlaceDetail != null) {
         debugPrint('Formatted address: ${_selectedPlaceDetail!.formattedAddress}');
         debugPrint('Components: ${_selectedPlaceDetail!.addressComponents}');
         debugPrint('Coordinates: (${_selectedPlaceDetail!.lat}, ${_selectedPlaceDetail!.lng})');
         
-        // Verify coordinates match the address using reverse geocoding (non-blocking)
-        // Don't wait for this - just log it for debugging
         GeocodingService.reverseGeocode(
           _selectedPlaceDetail!.lat,
           _selectedPlaceDetail!.lng,
@@ -173,7 +174,6 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
           debugPrint('Reverse geocoded address: $reverseGeocoded');
           debugPrint('Original formatted address: ${_selectedPlaceDetail!.formattedAddress}');
           
-          // If the reverse geocoded address is very different, log a warning
           if (reverseGeocoded != 'Unknown Location') {
             final originalLower = _selectedPlaceDetail!.formattedAddress.toLowerCase();
             final reverseLower = reverseGeocoded.toLowerCase();
@@ -191,20 +191,13 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
         
         final components = _selectedPlaceDetail!.addressComponents;
         
-        // For Places API results, we trust the data even if some components are missing
-        // This handles establishments, landmarks, and other non-standard addresses
         if (components != null && components.isNotEmpty) {
-          // Extract components with fallbacks
-          // For establishments, the streetAddress might be the establishment name
-          // Check if we have an actualStreet (the real street address) vs just the establishment name
           String streetAddress = components['streetAddress'] ?? 
                                  components['actualStreet'] ??
                                  components['street'] ?? 
                                  components['establishmentName'] ?? 
                                  '';
           
-          // If streetAddress is the establishment name and we have actualStreet, use that
-          // Otherwise, if streetAddress is empty, try to parse from formatted address
           if (streetAddress.isEmpty && _selectedPlaceDetail!.formattedAddress.isNotEmpty) {
             final parts = _selectedPlaceDetail!.formattedAddress.split(',').map((s) => s.trim()).toList();
             if (parts.isNotEmpty) {
@@ -212,17 +205,13 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
             }
           }
           
-          // For establishments, if the streetAddress is just the name and we have actualStreet, 
-          // combine them: "Science and Innovation Center, 1000 Hempstead Turnpike"
           if (components.containsKey('actualStreet') && 
               components['actualStreet']!.isNotEmpty &&
               streetAddress != components['actualStreet']) {
-            // The streetAddress is likely the establishment name, combine with actual street
             streetAddress = '${streetAddress}, ${components['actualStreet']}';
           }
           
           String city = components['city'] ?? '';
-          // If no city, try to extract from formatted address (usually second part)
           if (city.isEmpty && _selectedPlaceDetail!.formattedAddress.isNotEmpty) {
             final parts = _selectedPlaceDetail!.formattedAddress.split(',').map((s) => s.trim()).toList();
             if (parts.length >= 2) {
@@ -233,7 +222,6 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
           String state = components['state'] ?? '';
           String zipCode = components['zipCode'] ?? components['postalCode'] ?? '';
           
-          // Extract state and zip from formatted address if missing
           if ((state.isEmpty || zipCode.isEmpty) && _selectedPlaceDetail!.formattedAddress.isNotEmpty) {
             final parts = _selectedPlaceDetail!.formattedAddress.split(',').map((s) => s.trim()).toList();
             if (parts.length >= 3) {
@@ -244,7 +232,6 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
               if (stateZip.length >= 2 && zipCode.isEmpty) {
                 zipCode = stateZip[1];
               } else if (stateZip.length == 1 && zipCode.isEmpty) {
-                // Might be just zip code
                 final zipMatch = RegExp(r'\d{5}(-\d{4})?').firstMatch(stateZip[0]);
                 if (zipMatch != null) {
                   zipCode = zipMatch.group(0)!;
@@ -269,10 +256,7 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
           if (mounted) Navigator.of(context).pop();
           return;
         } else if (_selectedPlaceDetail!.formattedAddress.isNotEmpty) {
-          // Fallback: Parse formatted address even if components are missing
-          // This handles edge cases where Places API doesn't return components
           final formatted = _selectedPlaceDetail!.formattedAddress;
-          // Remove "USA" or "United States" from the end if present
           final cleaned = formatted.replaceAll(RegExp(r',\s*(USA|United States)$', caseSensitive: false), '');
           final parts = cleaned.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
           
@@ -286,14 +270,12 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
               final stateZipPart = parts[2];
               final stateZip = stateZipPart.split(' ').where((s) => s.isNotEmpty).toList();
               if (stateZip.isNotEmpty) {
-                // Check if first part is a state abbreviation (2 letters) or full state name
                 if (stateZip[0].length == 2 && RegExp(r'^[A-Z]{2}$').hasMatch(stateZip[0])) {
                   state = stateZip[0];
                   if (stateZip.length >= 2) {
                     zipCode = stateZip[1];
                   }
                 } else {
-                  // Might be full state name, try to extract zip
                   final zipMatch = RegExp(r'\d{5}(-\d{4})?').firstMatch(stateZipPart);
                   if (zipMatch != null) {
                     zipCode = zipMatch.group(0)!;
@@ -322,10 +304,8 @@ class _AddEditAddressDialogState extends State<AddEditAddressDialog> {
             return;
           }
         }
-        // If we still can't parse, fall through to validation
       }
 
-      // Fallback: For manually entered addresses, use Address Validation API
       final validationResult = await AddressValidationService.validateAddress(_addressController.text);
       final result = validationResult['result']?['address']?['postalAddress'];
       final verdict = validationResult['result']?['verdict'];

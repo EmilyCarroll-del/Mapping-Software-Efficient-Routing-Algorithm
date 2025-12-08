@@ -105,13 +105,22 @@ class FirestoreService {
   }
 
   Stream<List<UserModel>> getFreelanceDrivers() {
+    // Primary query: drivers with no companyId (null). Then filter out any with companyCode set.
     return _db
         .collection(_usersCollectionPath)
         .where('role', whereIn: ['driver', 'Driver'])
         .where('companyId', isEqualTo: null)
         .snapshots()
-        .map((snapshot) =>
-            snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList());
+        .map(
+          (snapshot) => snapshot.docs
+              .map((doc) => UserModel.fromFirestore(doc))
+              .where(
+                (u) =>
+                    u.companyCode == null ||
+                    (u.companyCode != null && u.companyCode!.isEmpty),
+              )
+              .toList(),
+        );
   }
 
   Stream<List<UserModel>> getDriversByCompany(String companyId) {
@@ -281,8 +290,41 @@ class FirestoreService {
   }
 
   Future<void> updateOrderStatus(String orderId, String status) {
-    return _db.collection(_ordersCollectionPath).doc(orderId).update({
-      'status': status,
+    final orderRef = _db.collection(_ordersCollectionPath).doc(orderId);
+    return _db.runTransaction((transaction) async {
+      // Update order status
+      transaction.update(orderRef, {'status': status});
+
+      // If not completed, nothing else to do
+      if (status != 'completed') return;
+
+      // Fetch order to get addresses and driverIds
+      final orderSnap = await transaction.get(orderRef);
+      if (!orderSnap.exists) return;
+
+      final order = OrderModel.fromJson(orderSnap.data()!);
+      if (order.driverIds.isEmpty) return;
+
+      // Pick the first driver (per requirement)
+      final driverIdToSet = order.driverIds.first;
+
+      // Helper to update an address doc safely
+      void _updateAddress(String? addressId) {
+        if (addressId == null || addressId.isEmpty) return;
+        final addrRef = _db.collection(_addressesCollectionPath).doc(addressId);
+        transaction.set(addrRef, {
+          'driverId': driverIdToSet,
+          'status': 'completed',
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
+      // Update pickup
+      _updateAddress(order.pickUpAddress.id);
+      // Update drop-offs
+      for (final addr in order.dropOffAddresses) {
+        _updateAddress(addr.id);
+      }
     });
   }
 
@@ -375,16 +417,67 @@ class FirestoreService {
 
   Future<void> assignOrderToDrivers(String orderId, List<String> driverIds) async {
     final orderRef = _db.collection(_ordersCollectionPath).doc(orderId);
+
+    List<String> previousDriverIds = [];
+    OrderModel? orderModel;
+
+    // Update order + capture previous driverIds and order data
     await _db.runTransaction((transaction) async {
       final orderSnapshot = await transaction.get(orderRef);
       if (!orderSnapshot.exists) throw Exception("Order not found!");
-      final order = OrderModel.fromJson(orderSnapshot.data()!);
+
+      final data = orderSnapshot.data()!;
+      orderModel = OrderModel.fromJson(data);
+
+      // previous driver ids before this assignment
+      previousDriverIds = List<String>.from((data['driverIds'] ?? const <dynamic>[]) as List<dynamic>);
 
       final newStatus = driverIds.isEmpty ? 'pending' : 'assigned';
 
-      transaction.update(orderRef, {'driverIds': driverIds, 'status': newStatus});
-      // TODO: Update addresses as well
+      transaction.update(orderRef, {
+        'driverIds': driverIds,
+        'status': newStatus,
+      });
+      // TODO: Update addresses as well if needed
     });
+
+    // Figure out which drivers are *newly* assigned
+    final newlyAssigned = driverIds
+        .where((id) => !previousDriverIds.contains(id))
+        .toList();
+
+    // If no new drivers were added, nothing to notify
+    if (newlyAssigned.isEmpty) {
+      return;
+    }
+
+    final pickupSummary =
+        orderModel?.pickUpAddress.fullAddress ?? 'a new order';
+
+    // Create notifications for newly assigned drivers
+    final notificationsRef = _db.collection('notifications');
+    final batch = _db.batch();
+
+    for (final driverId in newlyAssigned) {
+      final docRef = notificationsRef.doc();
+      batch.set(docRef, {
+        'userId': driverId,
+        'type': 'order', // used by the Orders tab in the mobile notifications UI
+        'title': 'New Order Assigned',
+        'message': 'You have been assigned a new order: $pickupSummary',
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'actionType': 'open_order',
+        'actionData': {
+          'orderId': orderId,
+        },
+        'metadata': {
+          'source': 'web_assignOrderToDrivers',
+        },
+      });
+    }
+
+    await batch.commit();
   }
 
   Future<void> unassignOrder(String orderId) async {

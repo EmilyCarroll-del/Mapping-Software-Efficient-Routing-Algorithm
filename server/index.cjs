@@ -38,12 +38,12 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/debug/key', (_req, res) => {
   const hasKey = !!process.env.PLACES_API_KEY;
   const keyLength = process.env.PLACES_API_KEY ? process.env.PLACES_API_KEY.length : 0;
-  const keyPreview = process.env.PLACES_API_KEY 
-    ? process.env.PLACES_API_KEY.substring(0, 10) + '...' 
+  const keyPreview = process.env.PLACES_API_KEY
+    ? process.env.PLACES_API_KEY.substring(0, 10) + '...'
     : 'NOT SET';
-  res.json({ 
-    hasKey, 
-    keyLength, 
+  res.json({
+    hasKey,
+    keyLength,
     keyPreview,
     message: hasKey ? 'API key is loaded' : 'API key is NOT loaded - check .env file'
   });
@@ -52,7 +52,7 @@ app.get('/debug/key', (_req, res) => {
 // Test endpoint to directly test the API key with Google
 app.get('/debug/test-api', async (_req, res) => {
   if (!process.env.PLACES_API_KEY) {
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: 'PLACES_API_KEY not set',
       message: 'Check your .env file'
     });
@@ -68,8 +68,8 @@ app.get('/debug/test-api', async (_req, res) => {
 
     console.log('🧪 Testing API key directly with Google...');
     console.log(`   Key: ${process.env.PLACES_API_KEY.substring(0, 15)}...`);
-    
-    const response = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', { 
+
+    const response = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', {
       params: testParams,
       // Explicitly remove any referrer headers
       headers: {
@@ -88,7 +88,7 @@ app.get('/debug/test-api', async (_req, res) => {
     if (response.data.status !== 'OK') {
       console.error(`❌ API test failed: ${response.data.status}`);
       console.error(`   Error: ${response.data.error_message || 'No error message'}`);
-      
+
       if (response.data.status === 'REQUEST_DENIED') {
         result.troubleshooting = [
           '1. Go to Google Cloud Console → APIs & Services → Credentials',
@@ -122,7 +122,7 @@ app.get('/places/autocomplete', async (req, res) => {
       console.error('❌ PLACES_API_KEY is not set in environment variables');
       return res.status(500).json({ status: 'ERROR', message: 'PLACES_API_KEY missing on server' });
     }
-    
+
     console.log(`🔍 Autocomplete request: input="${input}", country="${country}"`);
     if (!input) {
       return res.status(400).json({ status: 'ERROR', message: 'Missing query param: input' });
@@ -138,14 +138,14 @@ app.get('/places/autocomplete', async (req, res) => {
     }
 
     const r = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', { params });
-    
+
     if (r.data.status !== 'OK') {
       console.error(`❌ Google Places API error: ${r.data.status}`);
       console.error(`   Error message: ${r.data.error_message || 'No error message'}`);
     } else {
       console.log(`✅ Got ${r.data.predictions?.length || 0} predictions`);
     }
-    
+
     return res.status(r.status).json(r.data);
   } catch (e) {
     console.error('❌ Exception in /places/autocomplete:', e.message);

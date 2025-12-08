@@ -150,6 +150,42 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
       body: _buildLoggedInView(context, user),
+      floatingActionButton: PopupMenuButton<String>(
+        onSelected: (value) {
+          if (value == 'address') {
+            _showAddEditAddressDialog();
+          } else if (value == 'order') {
+            Navigator.of(context).pushNamed('/add-order');
+          }
+        },
+        itemBuilder: (context) => [
+          const PopupMenuItem(
+            value: 'address',
+            child: Row(
+              children: [
+                Icon(Icons.location_on),
+                SizedBox(width: 8),
+                Text('Add Address'),
+              ],
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'order',
+            child: Row(
+              children: [
+                Icon(Icons.local_shipping),
+                SizedBox(width: 8),
+                Text('Add Order'),
+              ],
+            ),
+          ),
+        ],
+        child: FloatingActionButton(
+          onPressed: null,
+          backgroundColor: const Color(0xFF0D2B0D),
+          child: const Icon(Icons.add, color: Colors.white),
+        ),
+      ),
     );
   }
 
@@ -158,11 +194,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     if (user == null) return;
     showDialog(
       context: context,
-      builder: (context) => AddEditAddressDialog(
+      builder: (dialogContext) => AddEditAddressDialog(
         address: address,
         userId: user.uid,
         onSave: (address) {
           _firestoreService.saveAddress(address);
+        },
+        onUploadCsv: () {
+          Navigator.of(dialogContext).pop();
+          _showUploadCsvDialog();
         },
       ),
     );
@@ -291,16 +331,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ),
               ElevatedButton.icon(
-                onPressed: () => Navigator.of(context).pushNamed('/admin-route-history'),
-                icon: const Icon(Icons.history),
-                label: const Text('Route History'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  backgroundColor: const Color(0xFF2E7D32), // kAdminGreen
-                  foregroundColor: Colors.white,
-                ),
-              ),
-              ElevatedButton.icon(
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -313,30 +343,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   backgroundColor: const Color(0xFF2E7D32), // kAdminGreen
                   foregroundColor: Colors.white,
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => _showAddEditAddressDialog(),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Address'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).pushNamed('/add-order'),
-                icon: const Icon(Icons.add),
-                label: const Text('Add Order'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                ),
-              ),
-              OutlinedButton.icon(
-                onPressed: _showUploadCsvDialog,
-                icon: const Icon(Icons.upload_file),
-                label: const Text('Upload CSV'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                 ),
               ),
             ],
