@@ -13,179 +13,67 @@ class ChatService {
       }) async {
     final currentUser = _auth.currentUser;
     if (currentUser == null) {
-      throw Exception('User must be logged in to create conversation');
+      throw Exception('User must be logged in to create a conversation');
     }
 
     final currentUserId = currentUser.uid.trim();
     otherUserId = otherUserId.trim();
     orderId = orderId?.trim();
 
-    // Get current user's details (company code and user type)
-    String? currentCompanyCode;
-    String? currentUserType;
-    try {
-      final currentUserDoc = await _db.collection('users').doc(currentUserId).get();
-      final currentUserData = currentUserDoc.data();
-      currentCompanyCode = currentUserData?['companyCode'] as String?;
-      currentUserType = currentUserData?['userType'] as String?;
-    } catch (e) {
-      print('Error getting current user data: $e');
+    // --- Start: New, Corrected Logic ---
+
+    // 1. Build the base query to find conversations the current user is part of.
+    // This query is secure and will be allowed by your security rules.
+    Query query = _db
+        .collection('conversations')
+        .where('participants', arrayContains: currentUserId);
+
+    // 2. Add a filter for the specific orderId, if provided.
+    if (orderId != null && orderId.isNotEmpty) {
+      query = query.where('orderId', isEqualTo: orderId);
+    } else {
+      // For generic chats, ensure we don't accidentally match an order-specific chat.
+      query = query.where('orderId', isEqualTo: null);
     }
 
-    // Get other user's details
-    String? otherCompanyCode;
-    String? otherUserType;
-    try {
-      final otherUserDoc = await _db.collection('users').doc(otherUserId).get();
-      final otherUserData = otherUserDoc.data();
-      otherCompanyCode = otherUserData?['companyCode'] as String?;
-      otherUserType = otherUserData?['userType'] as String?;
-    } catch (e) {
-      print('Error getting other user data: $e');
-      throw Exception('User not found');
+    final querySnapshot = await query.get();
+
+    // 3. From the results, find the specific conversation that includes the other user.
+    final existingConvo = querySnapshot.docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>?;
+      final participants = List<String>.from(data?['participants'] ?? []);
+      return participants.contains(otherUserId);
+    }).toList();
+
+
+    if (existingConvo.isNotEmpty) {
+      final conversationId = existingConvo.first.id;
+      // If found, ensure display names are up to date and return the ID.
+      await ensureDisplayNames(conversationId, [currentUserId, otherUserId]);
+      return conversationId;
     }
 
-    // Enforce company code and user type rules for chat
-    if (currentUserType == 'driver') {
-      if (otherUserType == 'driver') {
-        throw Exception('Drivers cannot chat with other drivers');
-      }
-      if (currentCompanyCode != null && currentCompanyCode.isNotEmpty) {
-        if (otherCompanyCode != currentCompanyCode) {
-          throw Exception('You can only chat with admins from your company');
-        }
-      }
-    }
+    // --- End: New, Corrected Logic ---
 
-    final companyCode = currentCompanyCode;
+    // 4. If no conversation exists, create a new one.
+    print('No existing conversation found. Creating a new one.');
 
-    // Deterministic keys
+    // Get user details for display names
+    final currentUserDetails = await getUserDetails(currentUserId);
+    final otherUserDetails = await getUserDetails(otherUserId);
+    final companyCode = currentUserDetails?['companyCode'] as String?;
+
+    // For deterministic keys if needed elsewhere, though not for primary lookup.
     final sortedIds = [currentUserId, otherUserId]..sort();
     final participantsKey = '${sortedIds[0]}_${sortedIds[1]}';
-
-    if (orderId != null && orderId.isNotEmpty) {
-      final participantsOrderKey = '${participantsKey}_$orderId';
-      final orderMatch = await _db
-          .collection('conversations')
-          .where('participantsOrderKey', isEqualTo: participantsOrderKey)
-          .limit(1)
-          .get();
-      if (orderMatch.docs.isNotEmpty) {
-        final conv = orderMatch.docs.first;
-        final data = conv.data();
-        final updates = <String, dynamic>{};
-        if ((data['orderTitle'] == null || (data['orderTitle'] as String).isEmpty) && orderTitle != null) {
-          updates['orderTitle'] = orderTitle;
-        }
-        final displayNames = (data['displayNames'] as Map<String, dynamic>?) ?? {};
-        if (!displayNames.containsKey(currentUserId) || (displayNames[currentUserId] as String?)?.isEmpty == true) {
-          final me = await getUserDetails(currentUserId);
-          if (me != null) displayNames[currentUserId] = me['name'] ?? '';
-        }
-        if (!displayNames.containsKey(otherUserId) || (displayNames[otherUserId] as String?)?.isEmpty == true) {
-          final other = await getUserDetails(otherUserId);
-          if (other != null) displayNames[otherUserId] = other['name'] ?? '';
-        }
-        if (displayNames.isNotEmpty) updates['displayNames'] = displayNames;
-        if (updates.isNotEmpty) await conv.reference.update(updates);
-        await ensureDisplayNames(conv.id, [currentUserId, otherUserId]);
-        return conv.id;
-      } else {
-        final possible = await _db
-            .collection('conversations')
-            .where('participants', arrayContains: currentUserId)
-            .get();
-        for (final conv in possible.docs) {
-          final d = conv.data();
-          final parts = List<String>.from(d['participants'] ?? []);
-          final convOrderId = (d['orderId'] as String?)?.trim();
-          if (parts.contains(otherUserId) && convOrderId == orderId) {
-            await conv.reference.update({
-              'participantsKey': participantsKey,
-              'participantsOrderKey': participantsOrderKey,
-            });
-            await ensureDisplayNames(conv.id, [currentUserId, otherUserId]);
-            return conv.id;
-          }
-        }
-      }
-    } else {
-      final genericMatch = await _db
-          .collection('conversations')
-          .where('participantsKey', isEqualTo: participantsKey)
-          .where('orderId', isEqualTo: null)
-          .limit(1)
-          .get();
-      if (genericMatch.docs.isNotEmpty) {
-        final id = genericMatch.docs.first.id;
-        await ensureDisplayNames(id, [currentUserId, otherUserId]);
-        return id;
-      }
-    }
-
-    // Check old 'chats' format for generic chat
-    try {
-      if (orderId == null) {
-        final oldChats = await _db
-            .collection('chats')
-            .where('users', arrayContains: currentUserId)
-            .get();
-
-        for (var chat in oldChats.docs) {
-          final users = List<String>.from(chat.data()['users'] ?? []);
-          if (users.contains(otherUserId)) {
-            final chatId = chat.id;
-            final oldData = chat.data();
-
-            final newConvRef = await _db.collection('conversations').add({
-              'participants': users,
-              'orderId': null,
-              'orderTitle': oldData['orderTitle'] ?? '',
-              'lastMessage': oldData['lastMessage'] ?? 'Conversation started',
-              'lastMessageTime': oldData['lastMessageTime'] ?? FieldValue.serverTimestamp(),
-              'unreadCount': {
-                currentUserId: 0,
-                otherUserId: 0,
-              },
-              'companyCode': companyCode,
-              'createdAt': oldData['createdAt'] ?? FieldValue.serverTimestamp(),
-              'participantsKey': participantsKey,
-              'participantsOrderKey': null,
-              'displayNames': {
-                for (final uid in users)
-                  uid: (await getUserDetails(uid))?['name'] ?? ''
-              },
-            });
-
-            final messagesSnapshot = await _db
-                .collection('chats')
-                .doc(chatId)
-                .collection('messages')
-                .get();
-
-            for (var msgDoc in messagesSnapshot.docs) {
-              await _db
-                  .collection('conversations')
-                  .doc(newConvRef.id)
-                  .collection('messages')
-                  .add(msgDoc.data());
-            }
-
-            return newConvRef.id;
-          }
-        }
-      }
-    } catch (e) {
-      print('Error checking old chats format: $e');
-    }
-
-    // Create new conversation
-    final participantsOrderKey = orderId != null && orderId.isNotEmpty
+    final participantsOrderKey = (orderId != null && orderId.isNotEmpty)
         ? '${participantsKey}_$orderId'
         : null;
 
     final conversationRef = await _db.collection('conversations').add({
       'participants': [currentUserId, otherUserId],
+      'participantsKey': participantsKey, // Kept for potential secondary lookups
+      'participantsOrderKey': participantsOrderKey, // Kept for potential secondary lookups
       'orderId': orderId,
       'orderTitle': orderTitle ?? '',
       'lastMessage': 'Conversation started',
@@ -196,15 +84,12 @@ class ChatService {
       },
       'companyCode': companyCode,
       'createdAt': FieldValue.serverTimestamp(),
-      'participantsKey': participantsKey,
-      'participantsOrderKey': participantsOrderKey,
       'displayNames': {
-        currentUserId: (await getUserDetails(currentUserId))?['name'] ?? '',
-        otherUserId: (await getUserDetails(otherUserId))?['name'] ?? '',
+        currentUserId: currentUserDetails?['name'] ?? '',
+        otherUserId: otherUserDetails?['name'] ?? '',
       },
     });
 
-    await ensureDisplayNames(conversationRef.id, [currentUserId, otherUserId]);
     return conversationRef.id;
   }
 

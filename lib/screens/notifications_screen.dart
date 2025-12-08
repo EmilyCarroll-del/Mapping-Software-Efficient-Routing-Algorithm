@@ -232,7 +232,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final data = notification.data() as Map<String, dynamic>;
     final type = data['type'] ?? 'system';
     final message = data['message'] ?? '';
-    final timestamp =
+    final timestamp = 
         (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
     final isRead = data['isRead'] ?? false;
     final actionType = data['actionType'] ?? 'none';
@@ -320,13 +320,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     await _notificationService.markAsRead(notification.id);
     if (!mounted) return;
 
+    // Try to pull out an orderId in a flexible way (from actionData or metadata)
+    final String? orderId =
+        (actionData['orderId'] as String?) ??
+            (metadata['orderId'] as String?);
+
     switch (actionType) {
       case 'view_order':
-        final orderId = actionData['orderId'] as String?;
+      // Normal order notification path
         if (orderId != null) {
-          await _markRelatedAsRead(conversationId: null, otherUserId: null, orderId: orderId);
-          context.go('/assigned-orders');
+          await _markRelatedAsRead(
+            conversationId: null,
+            otherUserId: null,
+            orderId: orderId,
+          );
         }
+        // Even if orderId is somehow null, still navigate to Assigned Orders
+        context.go('/assigned-orders');
         break;
 
       case 'open_chat':
@@ -347,6 +357,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         break;
 
       default:
+      //
+      // 🛟 Fallback: if this is an ORDER notification but the actionType
+      // is missing/unknown, still send user to Assigned Orders.
+      //
+        if (type == 'order') {
+          if (orderId != null) {
+            await _markRelatedAsRead(
+              conversationId: null,
+              otherUserId: null,
+              orderId: orderId,
+            );
+          }
+          context.go('/assigned-orders');
+          return;
+        }
+
+        // Otherwise, treat it as a legacy message-style notification
         await _tryOpenLegacyMessage(notification);
         break;
     }

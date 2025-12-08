@@ -1,12 +1,20 @@
 // lib/services/notification_service.dart
 import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class NotificationService {
-  NotificationService();
+  // navigatorKey is OPTIONAL so existing NotificationService() calls still work.
+  NotificationService([this.navigatorKey]);
+
+  // Used to navigate when a push notification is tapped.
+  // May be null if caller doesn't care about routing.
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -31,31 +39,53 @@ class NotificationService {
     _currentUserId = user.uid;
 
     try {
-      // Ask permission + store FCM token on the user doc
+      // -----------------------------
+      // 1) Ask permission + save FCM token
+      // -----------------------------
       final settings = await _messaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
+
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
         final token = await _messaging.getToken();
         if (token != null) {
           await _saveFCMToken(user.uid, token);
         }
+
         _messaging.onTokenRefresh.listen((newToken) {
           _saveFCMToken(user.uid, newToken);
         });
+      } else {
+        debugPrint('🔕 Notifications permission not granted');
       }
 
-      // We do NOT mirror FCM payloads into Firestore here — that was causing duplicates.
+      // -----------------------------
+      // 2) FCM listeners
+      // -----------------------------
       FirebaseMessaging.onMessage.listen((msg) {
         debugPrint('📩 onMessage (foreground): ${msg.data}');
       });
+
+      // App brought to foreground via tap
       FirebaseMessaging.onMessageOpenedApp.listen((msg) {
         debugPrint('➡️ onMessageOpenedApp: ${msg.data}');
+        _handleNotificationTap(msg);
       });
 
-      // Orders listener (driver-only)
+      // App launched from terminated via tap
+      final initialMessage = await _messaging.getInitialMessage();
+      if (initialMessage != null) {
+        debugPrint(
+          '🚀 App launched from terminated via notification: ${initialMessage.data}',
+        );
+        _handleNotificationTap(initialMessage);
+      }
+
+      // -----------------------------
+      // 3) Orders listener (driver-only)
+      // -----------------------------
       await _setupOrderListeners();
 
       _isInitialized = true;
@@ -217,17 +247,20 @@ class NotificationService {
     Map<String, dynamic>? metadata,
   }) async {
     try {
-      await _db.collection('notifications').doc(id).set({
-        'userId': userId,
-        'type': type, // 'order' | 'message' | 'system' | 'news'
-        'title': title,
-        'message': message,
-        'timestamp': FieldValue.serverTimestamp(),
-        'isRead': false,
-        'actionType': actionType, // 'view_order' | 'open_chat' | 'none'
-        'actionData': actionData ?? <String, dynamic>{},
-        'metadata': metadata ?? <String, dynamic>{},
-      }, SetOptions(merge: false)); // overwrite if same id shows up again
+      await _db.collection('notifications').doc(id).set(
+        {
+          'userId': userId,
+          'type': type, // 'order' | 'message' | 'system' | 'news'
+          'title': title,
+          'message': message,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isRead': false,
+          'actionType': actionType, // 'view_order' | 'open_chat' | 'none'
+          'actionData': actionData ?? <String, dynamic>{},
+          'metadata': metadata ?? <String, dynamic>{},
+        },
+        SetOptions(merge: false), // overwrite if same id shows up again
+      );
     } catch (e) {
       debugPrint('❌ Error creating notification (with id): $e');
     }
@@ -292,6 +325,7 @@ class NotificationService {
     }
   }
 
+  /// Unread count for *all* notification types
   Stream<int> getUnreadCount() {
     final user = _auth.currentUser;
     if (user == null) {
@@ -305,6 +339,21 @@ class NotificationService {
         .map((s) => s.docs.length);
   }
 
+  /// 🔹 Unread count for *message* notifications only (used for Inbox badge)
+  Stream<int> getUnreadMessageCount() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return Stream<int>.value(0);
+    }
+    return _db
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('isRead', isEqualTo: false)
+        .where('type', isEqualTo: 'message')
+        .snapshots()
+        .map((s) => s.docs.length);
+  }
+
   Stream<QuerySnapshot> getNotifications() {
     final user = _auth.currentUser;
     if (user == null) return const Stream.empty();
@@ -313,6 +362,94 @@ class NotificationService {
         .where('userId', isEqualTo: user.uid)
         .orderBy('timestamp', descending: true)
         .snapshots();
+  }
+
+  // ---- FCM tap handler / navigation ----
+
+  void _handleNotificationTap(RemoteMessage message) {
+    if (navigatorKey == null) {
+      debugPrint(
+        '🔔 Notification tap received but navigatorKey is null; skipping navigation.',
+      );
+      return;
+    }
+
+    final ctx = navigatorKey!.currentContext;
+    if (ctx == null) {
+      debugPrint('⚠️ No navigator context available for navigation');
+      return;
+    }
+
+    final data = message.data;
+
+    // type is something like: "chat", "order", "assigned_orders", "inbox", etc.
+    final String type = (data['type'] as String?) ?? 'chat';
+
+    // Be tolerant of different key names coming from the server:
+    final Object? convoRaw =
+        data['conversationId'] ?? data['chatId'] ?? data['convo'] ?? data['convoId'];
+    final String? conversationId = convoRaw?.toString();
+
+    // otherUserId: preferably explicit, otherwise fallback to senderId.
+    String? otherUserId = data['otherUserId']?.toString();
+    otherUserId ??= data['senderId']?.toString();
+    otherUserId ??= data['fromUserId']?.toString();
+
+    final String otherUserName =
+        (data['otherUserName'] as String?) ??
+            (data['senderName'] as String?) ??
+            'User';
+
+    final String? orderId = data['orderId']?.toString();
+    final String? orderTitle = data['orderTitle']?.toString();
+
+    final bool isOldFormat =
+    _parseBool(data['isOldFormat'] ?? data['oldFormat'] ?? false);
+
+    debugPrint(
+      '🔔 Handling notification tap: '
+          'type=$type, conversationId=$conversationId, otherUserId=$otherUserId, '
+          'orderId=$orderId, data=$data',
+    );
+
+    if (type == 'chat') {
+      if (conversationId == null || otherUserId == null) {
+        debugPrint(
+          '⚠️ Missing conversationId/otherUserId for chat push; sending user to Inbox instead.',
+        );
+        ctx.go('/inbox');
+        return;
+      }
+
+      ctx.go(
+        '/chat',
+        extra: <String, dynamic>{
+          'conversationId': conversationId,
+          'otherUserId': otherUserId,
+          'otherUserName': otherUserName,
+          'orderId': orderId,
+          'orderTitle': orderTitle,
+          'isOldFormat': isOldFormat,
+        },
+      );
+    } else if (type == 'assigned_orders' || type == 'order') {
+      ctx.go('/assigned-orders');
+    } else if (type == 'inbox') {
+      ctx.go('/inbox');
+    } else {
+      // Fallback: app notifications screen
+      ctx.go('/notifications');
+    }
+  }
+
+  bool _parseBool(Object? value) {
+    if (value is bool) return value;
+    if (value is String) {
+      final lower = value.toLowerCase();
+      return lower == 'true' || lower == '1' || lower == 'yes';
+    }
+    if (value is num) return value != 0;
+    return false;
   }
 
   // ---- helpers ----

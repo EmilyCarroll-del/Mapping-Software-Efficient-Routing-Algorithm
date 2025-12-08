@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/delivery_address.dart';
+import '../models/order.dart' as app_order;
 
 /// Service for managing Firestore operations related to deliveries and drivers.
 /// 
@@ -35,6 +37,9 @@ class FirestoreService {
   final String _deliveriesCollectionPath = 'deliveries';
   final String _usersCollectionPath = 'users';
 
+  // NEW: orders collection for multi-stop / pickup+dropoff orders
+  final String _ordersCollectionPath = 'orders';
+
   // Get deliveries assigned to a specific driver
   Stream<List<DeliveryAddress>> getDriverAssignedAddresses(String driverId) {
     return _db
@@ -51,21 +56,115 @@ class FirestoreService {
             }).toList());
   }
 
-  // Get completed deliveries for a specific driver
-  Stream<List<DeliveryAddress>> getDriverCompletedAddresses(String driverId) {
-    return _db
-        .collection(_deliveriesCollectionPath)
+  // Get completed orders for a specific driver
+  // Queries both 'orders' and 'addresses' collections
+  Stream<List<app_order.Order>> getDriverCompletedAddresses(String driverId) {
+    print('🔍 Route History: Querying completed orders for driver: $driverId');
+    
+    final controller = StreamController<List<app_order.Order>>();
+    List<app_order.Order> ordersList = [];
+    List<app_order.Order> addressesList = [];
+    bool ordersReady = false;
+    bool addressesReady = false;
+
+    void emitCombined() {
+      if (ordersReady && addressesReady) {
+        final allOrders = <app_order.Order>[...ordersList, ...addressesList];
+        
+        // Sort by completedAt if available, otherwise by updatedAt or createdAt
+        allOrders.sort((a, b) {
+          final aDate = a.updatedAt ?? a.createdAt;
+          final bDate = b.updatedAt ?? b.createdAt;
+          return bDate.compareTo(aDate); // Descending (newest first)
+        });
+        
+        print('✅ Route History: Returning ${allOrders.length} total completed orders (${ordersList.length} from orders, ${addressesList.length} from addresses)');
+        controller.add(allOrders);
+      }
+    }
+
+    // Query orders collection
+    final ordersSubscription = _db
+        .collection('orders')
+        .where('driverIds', arrayContains: driverId)
+        .where('status', isEqualTo: 'completed')
+        .snapshots()
+        .listen(
+          (snapshot) {
+            print('📦 Route History: Found ${snapshot.docs.length} completed orders in "orders" collection');
+            try {
+              ordersList = snapshot.docs.map((doc) {
+                try {
+                  return app_order.Order.fromOrderDoc(doc);
+                } catch (e) {
+                  print('❌ Route History: Error parsing order doc ${doc.id}: $e');
+                  return null;
+                }
+              }).whereType<app_order.Order>().toList();
+              ordersReady = true;
+              emitCombined();
+            } catch (e) {
+              print('❌ Route History: Error processing orders: $e');
+              ordersList = [];
+              ordersReady = true;
+              emitCombined();
+            }
+          },
+          onError: (error) {
+            print('❌ Route History: Error querying orders collection: $error');
+            ordersList = [];
+            ordersReady = true;
+            emitCombined();
+          },
+        );
+
+    // Query addresses collection
+    final addressesSubscription = _db
+        .collection('addresses')
         .where('driverId', isEqualTo: driverId)
         .where('status', isEqualTo: 'completed')
         .snapshots()
-        .map((snapshot) =>
-            snapshot.docs.map((doc) {
-              final data = doc.data();
-              return DeliveryAddress.fromJson({
-                'id': doc.id,
-                ...data,
-              });
-            }).toList());
+        .listen(
+          (snapshot) {
+            print('📍 Route History: Found ${snapshot.docs.length} completed addresses in "addresses" collection');
+            try {
+              addressesList = snapshot.docs.map((doc) {
+                try {
+                  return app_order.Order.fromAddressDoc(doc);
+                } catch (e) {
+                  print('❌ Route History: Error parsing address doc ${doc.id}: $e');
+                  return null;
+                }
+              }).whereType<app_order.Order>().toList();
+              addressesReady = true;
+              emitCombined();
+            } catch (e) {
+              print('❌ Route History: Error processing addresses: $e');
+              addressesList = [];
+              addressesReady = true;
+              emitCombined();
+            }
+          },
+          onError: (error) {
+            print('❌ Route History: Error querying addresses collection: $error');
+            addressesList = [];
+            addressesReady = true;
+            emitCombined();
+          },
+        );
+
+    // Clean up subscriptions when stream is cancelled or closed
+    controller.onCancel = () {
+      ordersSubscription.cancel();
+      addressesSubscription.cancel();
+    };
+
+    // Handle stream close
+    controller.onListen = () {
+      // Stream is being listened to, subscriptions are already active
+    };
+
+    return controller.stream;
   }
 
   // Get in-progress deliveries for a specific driver
@@ -254,5 +353,97 @@ class FirestoreService {
     }
     // Company driver can only work with matching company admin
     return driverCompanyCode == adminCompanyCode;
+  }
+
+  // ---------------------------------------------------------------------------
+  // NEW: ORDER ASSIGNMENT + NOTIFICATIONS FOR MULTI-STOP ORDERS
+  // ---------------------------------------------------------------------------
+
+  /// Assigns an order (from the `orders` collection) to one or more drivers.
+  ///
+  /// - Updates `driverIds` and `status` on the order document.
+  /// - Detects which drivers are *newly* assigned (vs previously assigned).
+  /// - For each newly assigned driver, creates a "New Order Assigned"
+  ///   notification in the `notifications` collection.
+  ///
+  /// Assumes each order document has:
+  ///   - `driverIds`: List<String>
+  ///   - `status`: String
+  ///   - `adminId`: String (creator/admin)
+  ///   - `pickUpAddress`: Map with `streetAddress`, `city`, `state`, `zipCode`
+  Future<void> assignOrderToDrivers(
+      String orderId, List<String> driverIds) async {
+    final orderRef = _db.collection(_ordersCollectionPath).doc(orderId);
+
+    List<String> newlyAssignedDriverIds = [];
+    String pickupSummary = '';
+    String adminId = '';
+
+    // 1) Transaction: update order + compute newly assigned drivers
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(orderRef);
+      if (!snapshot.exists) {
+        throw Exception('Order not found');
+      }
+
+      final data = snapshot.data() as Map<String, dynamic>;
+
+      final previousDriverIds = List<String>.from(
+          (data['driverIds'] ?? const <dynamic>[]) as List<dynamic>);
+
+      // drivers that were not previously assigned
+      newlyAssignedDriverIds = driverIds
+          .where((id) => !previousDriverIds.contains(id))
+          .toList();
+
+      // Build pickup address summary string for notification message
+      final pickup =
+      Map<String, dynamic>.from(data['pickUpAddress'] ?? const {});
+      final street = (pickup['streetAddress'] ?? '').toString();
+      final city = (pickup['city'] ?? '').toString();
+      final state = (pickup['state'] ?? '').toString();
+      final zip = (pickup['zipCode'] ?? '').toString();
+
+      pickupSummary = [
+        street,
+        if (city.isNotEmpty) city,
+        if (state.isNotEmpty) state,
+        if (zip.isNotEmpty) zip,
+      ].where((part) => part.isNotEmpty).join(', ');
+
+      adminId = (data['adminId'] ?? '').toString();
+
+      final newStatus = driverIds.isEmpty ? 'pending' : 'assigned';
+
+      transaction.update(orderRef, {
+        'driverIds': driverIds,
+        'status': newStatus,
+      });
+    });
+
+    // 2) Create notifications for newly assigned drivers
+    if (newlyAssignedDriverIds.isEmpty) return;
+
+    final message = pickupSummary.isNotEmpty
+        ? 'You have been assigned a new order: $pickupSummary'
+        : 'You have been assigned a new order.';
+
+    for (final driverId in newlyAssignedDriverIds) {
+      await _db.collection('notifications').add({
+        'userId': driverId,
+        'type': 'order', // used by "Orders" tab filter
+        'title': 'New Order Assigned',
+        'message': message,
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'actionType': 'view_order',
+        'actionData': {
+          'orderId': orderId,
+        },
+        'metadata': {
+          'adminId': adminId,
+        },
+      });
+    }
   }
 }

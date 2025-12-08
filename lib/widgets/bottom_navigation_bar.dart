@@ -15,7 +15,7 @@ class CustomBottomNavigationBar extends StatelessWidget {
     final notificationService = NotificationService();
     final currentUser = FirebaseAuth.instance.currentUser;
     const darkGreen = Color(0xFF0D2B0D); // Match header color
-    
+
     int currentIndex = 0;
     if (currentLocation.startsWith('/inbox')) {
       currentIndex = 1;
@@ -64,41 +64,42 @@ class CustomBottomNavigationBar extends StatelessWidget {
             BottomNavigationBarItem(
               icon: currentUser != null
                   ? StreamBuilder<int>(
-                      stream: notificationService.getUnreadCount(),
-                      builder: (context, snapshot) {
-                        final unreadCount = snapshot.data ?? 0;
-                        return Stack(
-                          children: [
-                            const Icon(Icons.inbox),
-                            if (unreadCount > 0)
-                              Positioned(
-                                right: 0,
-                                top: 0,
-                                child: Container(
-                                  padding: const EdgeInsets.all(2),
-                                  decoration: const BoxDecoration(
-                                    color: Colors.red,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  constraints: const BoxConstraints(
-                                    minWidth: 16,
-                                    minHeight: 16,
-                                  ),
-                                  child: Text(
-                                    unreadCount > 9 ? '9+' : '$unreadCount',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
+                // 🔹 use messages-only unread count for Inbox badge
+                stream: notificationService.getUnreadMessageCount(),
+                builder: (context, snapshot) {
+                  final unreadCount = snapshot.data ?? 0;
+                  return Stack(
+                    children: [
+                      const Icon(Icons.inbox),
+                      if (unreadCount > 0)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              unreadCount > 9 ? '9+' : '$unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
                               ),
-                          ],
-                        );
-                      },
-                    )
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              )
                   : const Icon(Icons.inbox),
               label: 'Inbox',
             ),

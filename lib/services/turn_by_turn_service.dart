@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:vector_math/vector_math.dart';
-// import 'package:geolocator/geolocator.dart'; // Removed to avoid potential platform channel overhead in loops
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 
 import '../models/route_optimization.dart';
 import '../models/delivery_address.dart';
@@ -23,8 +24,7 @@ class TurnByTurnService {
       final p2 = routePoints[i];
       final p3 = routePoints[i + 1];
 
-      // Use local Haversine calculation instead of Geolocator to ensure pure Dart performance
-      distanceSinceLastTurn += _calculateDistance(
+      distanceSinceLastTurn += Geolocator.distanceBetween(
         p1.latitude, p1.longitude,
         p2.latitude, p2.longitude,
       );
@@ -33,14 +33,28 @@ class TurnByTurnService {
 
       if (turnAngle.abs() > _kTurnThreshold && distanceSinceLastTurn > _kMinDistanceBetweenTurns) {
         String turnDirection = turnAngle > 0 ? "Turn right" : "Turn left";
-        
-        final String instruction = turnDirection;
+        String streetName = '';
 
+        try {
+          final List<Placemark> placemarks = await placemarkFromCoordinates(p2.latitude, p2.longitude);
+          if (placemarks.isNotEmpty && placemarks.first.street != null) {
+            streetName = placemarks.first.street!;
+          }
+        } catch (e) {
+          print("Reverse geocoding for turn instruction failed: $e");
+        }
+
+        final String instruction = streetName.isNotEmpty
+            ? '$turnDirection on $streetName'
+            : turnDirection;
+
+        // --- Definitive FIX: Prevent consecutive duplicate instructions ---
         if (steps.isNotEmpty && steps.last.instructions == instruction) {
+            // This is a duplicate instruction for the same maneuver, ignore it.
+            // Continue accumulating distance for the next *different* turn.
             continue;
         }
 
-        // --- FIX: Correctly using the named constructor or default ---
         steps.add(RouteStep(
           sequenceNumber: steps.length + 1,
           address: DeliveryAddress.fromCoordinates(
@@ -51,7 +65,10 @@ class TurnByTurnService {
           distanceFromPrevious: distanceSinceLastTurn / 1000, // Convert meters to km
         ));
 
+        // Reset distance *only* after a unique turn is added.
         distanceSinceLastTurn = 0.0;
+
+        await Future.delayed(const Duration(milliseconds: 150));
       }
     }
     
@@ -60,23 +77,6 @@ class TurnByTurnService {
 
 
   // --- Core Mathematical Functions ---
-
-  /// Calculates the distance between two points in meters using the Haversine formula.
-  static double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-    const double R = 6371000; // Earth radius in meters
-    final double phi1 = radians(lat1);
-    final double phi2 = radians(lat2);
-    final double deltaPhi = radians(lat2 - lat1);
-    final double deltaLambda = radians(lon2 - lon1);
-
-    final double a = math.sin(deltaPhi / 2) * math.sin(deltaPhi / 2) +
-        math.cos(phi1) * math.cos(phi2) *
-            math.sin(deltaLambda / 2) * math.sin(deltaLambda / 2);
-    
-    final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-
-    return R * c;
-  }
 
   static double _calculateBearing(LatLng point1, LatLng point2) {
     final lat1 = radians(point1.latitude);

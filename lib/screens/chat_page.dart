@@ -34,7 +34,7 @@ class _ChatPageState extends State<ChatPage> {
   final ScrollController _scrollController = ScrollController();
   final ChatService _chatService = ChatService();
   final FocusNode _messageFocusNode = FocusNode();
-  
+
   final User? currentUser = FirebaseAuth.instance.currentUser;
   bool _isLoading = false;
   bool _isTyping = false;
@@ -89,7 +89,7 @@ class _ChatPageState extends State<ChatPage> {
           'senderId': currentUserId,
           'timestamp': FieldValue.serverTimestamp(),
         });
-        
+
         // Update chat document
         await FirebaseFirestore.instance
             .collection('chats')
@@ -104,7 +104,7 @@ class _ChatPageState extends State<ChatPage> {
           message,
         );
       }
-      
+
       if (quickReply == null) {
         _messageController.clear();
       }
@@ -145,7 +145,7 @@ class _ChatPageState extends State<ChatPage> {
         // Upload image to Firebase Storage
         final File imageFile = File(image.path);
         final String fileName = 'chat_images/${widget.conversationId}/${DateTime.now().millisecondsSinceEpoch}.jpg';
-        
+
         final Reference storageRef = FirebaseStorage.instance.ref().child(fileName);
         final UploadTask uploadTask = storageRef.putFile(imageFile);
         final TaskSnapshot snapshot = await uploadTask;
@@ -190,8 +190,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   List<String> _getQuickReplies() {
-    // Determine if current user is driver or admin based on order context
-    // For now, provide general quick replies that work for both
     return [
       'On my way',
       'Arrived at pickup',
@@ -256,7 +254,7 @@ class _ChatPageState extends State<ChatPage> {
     final imageUrl = messageData['imageUrl'];
     final messageType = messageData['messageType'] ?? 'text';
     final readBy = List<String>.from(messageData['readBy'] ?? []);
-    
+
     final isMyMessage = senderId == currentUser?.uid;
     final isRead = readBy.length > 1; // More than just sender
 
@@ -281,7 +279,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             const SizedBox(width: 8),
           ],
-          
+
           Flexible(
             child: Container(
               constraints: BoxConstraints(
@@ -327,7 +325,7 @@ class _ChatPageState extends State<ChatPage> {
                         },
                       ),
                     ),
-                  
+
                   if (messageType == 'text' || (messageType == 'image' && message != 'Photo'))
                     Text(
                       message,
@@ -336,9 +334,9 @@ class _ChatPageState extends State<ChatPage> {
                         fontSize: 16,
                       ),
                     ),
-                  
+
                   const SizedBox(height: 4),
-                  
+
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -349,7 +347,7 @@ class _ChatPageState extends State<ChatPage> {
                           fontSize: 10,
                         ),
                       ),
-                      
+
                       if (isMyMessage) ...[
                         const SizedBox(width: 4),
                         Icon(
@@ -364,7 +362,7 @@ class _ChatPageState extends State<ChatPage> {
               ),
             ),
           ),
-          
+
           if (isMyMessage) ...[
             const SizedBox(width: 8),
             CircleAvatar(
@@ -427,7 +425,7 @@ class _ChatPageState extends State<ChatPage> {
                   },
                 ),
               ),
-            
+
             Row(
               children: [
                 IconButton(
@@ -435,12 +433,13 @@ class _ChatPageState extends State<ChatPage> {
                   icon: const Icon(Icons.camera_alt),
                   color: kPrimaryColor,
                 ),
-                
+
                 Expanded(
                   child: TextField(
                     controller: _messageController,
                     focusNode: _messageFocusNode,
-                    maxLines: null,
+                    maxLines: 1, // SINGLE LINE: Enter will submit
+                    textInputAction: TextInputAction.send,
                     textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
                       hintText: 'Type a message...',
@@ -460,12 +459,12 @@ class _ChatPageState extends State<ChatPage> {
                         _isTyping = text.isNotEmpty;
                       });
                     },
-                    onSubmitted: (_) => _sendMessage(),
+                    onSubmitted: (_) => _sendMessage(), // ENTER sends
                   ),
                 ),
-                
+
                 const SizedBox(width: 8),
-                
+
                 Container(
                   decoration: BoxDecoration(
                     color: kPrimaryColor,
@@ -475,13 +474,13 @@ class _ChatPageState extends State<ChatPage> {
                     onPressed: _isLoading ? null : () => _sendMessage(),
                     icon: _isLoading
                         ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
                         : const Icon(Icons.send),
                     color: Colors.white,
                   ),
@@ -497,7 +496,7 @@ class _ChatPageState extends State<ChatPage> {
   String _formatTimestamp(DateTime timestamp) {
     final now = DateTime.now();
     final difference = now.difference(timestamp);
-    
+
     if (difference.inDays > 0) {
       return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
     } else if (difference.inHours > 0) {
@@ -560,16 +559,16 @@ class _ChatPageState extends State<ChatPage> {
       body: Column(
         children: [
           _buildOrderHeader(),
-          
+
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: widget.isOldFormat
                   ? FirebaseFirestore.instance
-                      .collection('chats')
-                      .doc(widget.conversationId)
-                      .collection('messages')
-                      .orderBy('timestamp', descending: true)
-                      .snapshots()
+                  .collection('chats')
+                  .doc(widget.conversationId)
+                  .collection('messages')
+                  .orderBy('timestamp', descending: true)
+                  .snapshots()
                   : _chatService.getMessages(widget.conversationId),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -631,7 +630,7 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
           ),
-          
+
           _buildMessageInput(),
         ],
       ),

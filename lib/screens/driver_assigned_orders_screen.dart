@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -259,7 +258,7 @@ class _DriverAssignedOrdersScreenState
                             const SizedBox(height: 8),
                             ...order.dropOffAddresses.map((address) => Padding(
                                 padding:
-                                    const EdgeInsets.only(bottom: 12.0),
+                                const EdgeInsets.only(bottom: 12.0),
                                 child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
@@ -329,7 +328,7 @@ class _DriverAssignedOrdersScreenState
         margin: const EdgeInsets.only(bottom: 16),
         elevation: 4,
         shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -505,7 +504,7 @@ class _DriverAssignedOrdersScreenState
       if (adminUserId == null && _currentUser != null) {
         try {
           final currentUserDoc =
-              await _firestore.collection('users').doc(_currentUser!.uid).get();
+          await _firestore.collection('users').doc(_currentUser!.uid).get();
           final currentUserData = currentUserDoc.data();
           final companyCode = currentUserData?['companyCode'] as String?;
 
@@ -536,7 +535,7 @@ class _DriverAssignedOrdersScreenState
 
       if (adminUserId == null || adminUserId.isEmpty) {
         LoadingOverlay.hide(context); // Hide overlay before showing error
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -565,10 +564,10 @@ class _DriverAssignedOrdersScreenState
         return;
       }
 
-      
+
       // Hide Overlay before navigating
       LoadingOverlay.hide(context);
-      
+
       // Navigate to chat page
       await Navigator.push(
         context,
@@ -627,6 +626,13 @@ class _DriverAssignedOrdersScreenState
   }
 
   Future<void> _startDeliveryRouting(app_order.Order order) async {
+    print('\n');
+    print('======================================================');
+    print('🚦 STARTING DELIVERY ROUTING 🚦');
+    print('======================================================');
+    print('Order ID: ${order.id}');
+
+
     if (!mounted) return;
 
     // Use the new LoadingOverlay instead of the custom dialog
@@ -660,13 +666,17 @@ class _DriverAssignedOrdersScreenState
         // If critical coordinates are missing, we might need to stop.
         // For now, assuming we might have partial data or can rely on fallback
       }
-      
-      
+
+
       final routeOptimization = await _awsRouteService.calculateRoute(
         addresses: addressesForRouting,
         travelMode: 'Truck',
       );
-
+      print('✅ AWS Route calculation successful!');
+      print('  - Total Distance: ${routeOptimization.totalDistance?.toStringAsFixed(1)} km');
+      print('  - Estimated Time: ${routeOptimization.estimatedTime?.inMinutes} minutes');
+      print('  - Route Steps: ${routeOptimization.optimizedRoute?.length ?? 0}');
+      print('======================================================\n');
 
       if (!mounted) return;
       LoadingOverlay.hide(context); // Hide the overlay
@@ -685,11 +695,11 @@ class _DriverAssignedOrdersScreenState
         // Screen will refresh automatically
       }
     } catch (e, stackTrace) {
-      // print('❌ Error in _startDeliveryRouting: $e');
-      // print('Stack trace: $stackTrace');
-      
+      print('❌ Error in _startDeliveryRouting: $e');
+      print('Stack trace: $stackTrace');
+
       if (mounted) LoadingOverlay.hide(context); // Hide the overlay on error
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Error calculating route: ${e.toString()}'),

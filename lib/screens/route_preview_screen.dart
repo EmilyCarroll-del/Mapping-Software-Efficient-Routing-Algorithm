@@ -126,6 +126,11 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
     return '${minutes}m';
   }
 
+  String _formatDistance(double km) {
+    final miles = km * 0.621371;
+    return '${miles.toStringAsFixed(1)} mi';
+  }
+
   @override
   Widget build(BuildContext context) {
     final displaySteps = widget.routeOptimization.legs.length > 1
@@ -183,7 +188,7 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
                       children: [
                         _buildSummaryItem(
                           Icons.route,
-                          '${(widget.routeOptimization.totalDistance ?? 0).toStringAsFixed(1)} km',
+                          _formatDistance(widget.routeOptimization.totalDistance ?? 0),
                           'Distance',
                         ),
                         _buildSummaryItem(
@@ -225,11 +230,10 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
                               step.address.fullAddress,
                               style: const TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            subtitle: Text('Leg distance: ${step.distanceFromPrevious?.toStringAsFixed(1) ?? '0'} km'),
                             trailing: step.distanceFromPrevious != null &&
                                     step.distanceFromPrevious! > 0
                                 ? Text(
-                                    '${step.distanceFromPrevious!.toStringAsFixed(1)} km',
+                                    _formatDistance(step.distanceFromPrevious!),
                                     style: TextStyle(
                                       color: Colors.grey[600],
                                       fontSize: 12,

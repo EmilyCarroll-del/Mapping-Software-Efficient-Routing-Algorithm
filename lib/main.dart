@@ -25,6 +25,11 @@ import 'signup.dart';
 import 'widgets/bottom_navigation_bar.dart';
 
 // ---------------------------------------------------------------------------
+// Global navigator key so NotificationService can trigger navigation
+// when a notification is tapped.
+final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
+
+// ---------------------------------------------------------------------------
 // Background FCM handler (must be a top-level function).
 // We **do not** write Firestore notifications here to avoid duplicates.
 // Use it only for logging or preloading if you need to.
@@ -35,7 +40,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 // ---------------------------------------------------------------------------
 
-// Listenable class for auth state changes
+// Listenable class for auth state changes (used by GoRouter)
 class _AuthStateNotifier extends ChangeNotifier {
   _AuthStateNotifier() {
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
@@ -53,7 +58,8 @@ void main() async {
     await dotenv.load(fileName: ".env");
 
     // Verify that .env file was loaded successfully
-    final hasApiKey = dotenv.env['AWS_API_KEY'] != null && dotenv.env['AWS_API_KEY']!.isNotEmpty;
+    final hasApiKey =
+        dotenv.env['AWS_API_KEY'] != null && dotenv.env['AWS_API_KEY']!.isNotEmpty;
     final hasRegion = dotenv.env['AWS_REGION'] != null;
     final hasCalculator = dotenv.env['AWS_CALCULATOR_NAME'] != null;
 
@@ -92,15 +98,10 @@ void main() async {
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   // Initialize NotificationService tied to auth state
-  final notificationService = NotificationService();
+  final notificationService = NotificationService(_rootNavigatorKey);
+
   FirebaseAuth.instance.authStateChanges().listen((user) {
     if (user != null) {
-      // Set the user's role to 'Driver' on every login
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set({'role': 'Driver'}, SetOptions(merge: true));
-
       notificationService.initialize();
     } else {
       notificationService.dispose();
@@ -137,11 +138,13 @@ class GraphGoApp extends StatelessWidget {
 
 final GoRouter _router = GoRouter(
   initialLocation: '/splash',
+  navigatorKey: _rootNavigatorKey,
   refreshListenable: _AuthStateNotifier(),
   redirect: (BuildContext context, GoRouterState state) {
     final user = FirebaseAuth.instance.currentUser;
     final isLoggedIn = user != null;
-    final isLoggingIn = state.matchedLocation == '/login' || state.matchedLocation == '/signup';
+    final isLoggingIn =
+        state.matchedLocation == '/login' || state.matchedLocation == '/signup';
     final isSplash = state.matchedLocation == '/splash';
 
     if (isSplash) {
@@ -153,6 +156,7 @@ final GoRouter _router = GoRouter(
       return '/';
     }
 
+    // No automatic redirect to login - let the home screen handle it
     return null; // No redirect needed
   },
   routes: <RouteBase>[
@@ -166,7 +170,8 @@ final GoRouter _router = GoRouter(
       builder: (context, state, child) {
         return Scaffold(
           body: child,
-          bottomNavigationBar: CustomBottomNavigationBar(currentLocation: state.matchedLocation),
+          bottomNavigationBar:
+          CustomBottomNavigationBar(currentLocation: state.matchedLocation),
         );
       },
       routes: <RouteBase>[
@@ -180,7 +185,8 @@ final GoRouter _router = GoRouter(
           path: '/inbox',
           builder: (BuildContext context, GoRouterState state) {
             final openId = state.extra is Map<String, dynamic>
-                ? (state.extra as Map<String, dynamic>)['openConversationId']?.toString()
+                ? (state.extra as Map<String, dynamic>)['openConversationId']
+                ?.toString()
                 : null;
             return InboxPage(openConversationId: openId);
           },
@@ -218,10 +224,13 @@ final GoRouter _router = GoRouter(
 
             final conversationId = extras['conversationId']?.toString();
             final otherUserId = extras['otherUserId']?.toString();
-            final otherUserName = (extras['otherUserName']?.toString()) ?? 'User';
+            final otherUserName =
+                (extras['otherUserName']?.toString()) ?? 'User';
             final orderId = extras['orderId']?.toString();
             final orderTitle = extras['orderTitle']?.toString();
-            final isOldFormat = (extras['isOldFormat'] is bool) ? extras['isOldFormat'] as bool : false;
+            final isOldFormat = (extras['isOldFormat'] is bool)
+                ? extras['isOldFormat'] as bool
+                : false;
 
             if (conversationId == null || otherUserId == null) {
               return Scaffold(
